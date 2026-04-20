@@ -161,24 +161,24 @@ setup-sway:
 upgrade: build-release
 	@RUNNING_PIDS="$$(pidof -c $(BIN_NAME) $(LEGACY_BIN_NAME) 2>/dev/null || true)"; \
 	if [ -n "$$RUNNING_PIDS" ]; then \
-		ARGS_FILE="$$(mktemp)"; \
+		ARGS_FILE="$$(mktemp)" || exit 1; \
+		trap 'rm -f "$$ARGS_FILE"' EXIT; \
 		for pid in $$RUNNING_PIDS; do \
-			"$(DESTDIR)$(BINDIR)/$(BIN_NAME)" --dump-args "$$pid" 2>/dev/null >> "$$ARGS_FILE" || true; \
+			target/release/$(BIN_NAME) --dump-args "$$pid" >> "$$ARGS_FILE" || exit 1; \
 		done; \
 		echo "Stopping running instance(s): $$RUNNING_PIDS"; \
 		kill $$RUNNING_PIDS 2>/dev/null || true; \
 		sleep 1; \
-		$(MAKE) install-bin install-data; \
+		$(MAKE) install-bin install-data || exit 1; \
 		if [ -s "$$ARGS_FILE" ]; then \
 			while IFS= read -r args; do \
 				echo "Restarting with captured args: $$args"; \
 				setsid sh -c "$$args" </dev/null >/dev/null 2>&1 & \
 			done < "$$ARGS_FILE"; \
 		fi; \
-		rm -f "$$ARGS_FILE"; \
 	else \
 		echo "No running instance — installing without restart"; \
-		$(MAKE) install-bin install-data; \
+		$(MAKE) install-bin install-data || exit 1; \
 	fi
 	@echo "Upgrade complete."
 
