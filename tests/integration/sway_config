@@ -1,0 +1,16 @@
+# Minimal Sway config for headless integration testing
+# Used with WLR_BACKENDS=headless WLR_RENDERER=pixman
+
+# No physical outputs needed — headless backend provides virtual output
+# No keybindings needed — we control everything via IPC
+
+# Use a simple font
+font pango:monospace 10
+
+# No borders for simpler testing
+default_border none
+
+# No status bar
+bar {
+    mode invisible
+}

@@ -1,0 +1,75 @@
+# cargo-deny configuration
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+]
+
+[output]
+feature-depth = 1
+
+# =============================================================================
+# Advisories — check for known vulnerabilities
+# =============================================================================
+[advisories]
+ignore = []
+
+# =============================================================================
+# Licenses — only allow known-good open source licenses
+# =============================================================================
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    "CC0-1.0",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unlicense",
+    # Common permissive licenses that occasionally surface via C-binding
+    # and compression dep chains. Added preemptively so a routine
+    # `cargo update` doesn't break `cargo-deny` on an otherwise fine dep.
+    "BSD-3-Clause",
+    "Zlib",
+]
+confidence-threshold = 0.8
+exceptions = []
+
+[licenses.private]
+ignore = false
+registries = []
+
+# =============================================================================
+# Bans — prevent unwanted or duplicate crates
+# =============================================================================
+[bans]
+multiple-versions = "warn"
+wildcards = "allow"
+highlight = "all"
+workspace-default-features = "allow"
+external-default-features = "allow"
+allow = []
+deny = []
+# Transitive duplicates from env_logger (anstream 0.6) vs clap (anstream 1.0).
+# Both are latest versions — waiting on env_logger to adopt anstream 1.0.
+skip = [
+    { crate = "anstream@0.6", reason = "env_logger 0.11 depends on anstream 0.6, clap 4.6 uses 1.0" },
+    { crate = "anstyle-parse@0.2", reason = "transitive from anstream 0.6 vs 1.0 split" },
+]
+# toml_datetime split is deep in GTK4's build dependency tree (system-deps → toml
+# vs proc-macro-crate → toml_edit). No action possible from our side.
+skip-tree = [
+    { crate = "toml_datetime@0.7", reason = "GTK4 build dep (system-deps) uses older toml chain" },
+]
+
+# =============================================================================
+# Sources — only allow crates from crates.io
+# =============================================================================
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

@@ -1,0 +1,31 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+
+# rustc debug info (MSVC Windows)
+*.pdb
+
+# cargo-mutants output
+**/mutants.out*/
+
+# SonarQube scanner work dir
+.scannerwork/
+
+# Secrets — per-repo .env holds SONAR_TOKEN and any other credentials.
+# `.env.example` is intentionally NOT ignored — commit a placeholder
+# template so contributors know which vars to set.
+.env
+
+# SonarQube truststore (self-signed cert; regenerated per-machine)
+.truststore
+truststore.jks
+
+# Editor / IDE cruft
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# NOTE: Cargo.lock is NOT ignored. It's committed for both the library
+# and binary crates so `cargo audit` runs reproducibly.

@@ -1,0 +1,21 @@
+name: Rustfmt
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    name: cargo fmt --check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # rust-toolchain.toml pins the channel + components (rustfmt, clippy);
+      # rustup on the runner auto-installs on first cargo invocation.
+      - run: cargo fmt --all -- --check

@@ -1,0 +1,22 @@
+name: Clippy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  clippy:
+    name: cargo clippy -D warnings
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: ./.github/actions/setup-gtk4
+      # rust-toolchain.toml pins the channel + clippy component;
+      # rustup on the runner auto-installs on first cargo invocation.
+      - run: cargo clippy --all-targets --workspace -- -D warnings

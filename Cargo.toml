@@ -1,0 +1,43 @@
+[package]
+name = "nwg-dock"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT"
+description = "A macOS-style dock for Hyprland and Sway, written in Rust. Supports both compositors through one binary via the nwg-common Compositor trait with runtime auto-detection. Ships a nwg-dock-hyprland symlink alias for Go-version users — drag-to-reorder, per-monitor windows, auto-hide, shared pin file with nwg-drawer."
+readme = "README.md"
+repository = "https://github.com/jasonherald/nwg-dock"
+keywords = ["hyprland", "sway", "dock", "wayland", "gtk4"]
+categories = ["gui", "command-line-utilities"]
+
+[[bin]]
+name = "nwg-dock"
+path = "src/main.rs"
+
+[dependencies]
+# Shared library (library + binaries all on the 0.3.x line)
+nwg-common = "0.3"
+
+# GTK4 + Wayland layer shell
+gtk4 = "0.10"
+gtk4-layer-shell = "0.7"
+
+# Serialization (Hyprland JSON IPC)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+anyhow = "1"
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+
+# Unix signals and process management
+nix = { version = "0.31", features = ["signal", "process", "fs"] }
+
+# File watching (pin-file inotify, CSS hot-reload)
+notify = "8"

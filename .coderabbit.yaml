@@ -1,0 +1,196 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+language: "en-US"
+tone_instructions: "Professional, concise. Prioritize idiomatic Rust, safety, correctness, GTK4/Wayland best practices. macOS-style dock/drawer/notifications for Hyprland/Sway, ported from Go."
+
+reviews:
+  profile: "assertive"
+  high_level_summary: true
+  sequence_diagrams: false
+  poem: false
+  collapse_walkthrough: false
+  changed_files_summary: true
+
+  # Verify the PR actually addresses the issues it claims to close (catches
+  # "PR #X says it closes #Y but doesn't actually fix it" mismatches).
+  assess_linked_issues: true
+
+  # Auto-cross-link related issues + PRs in the review summary so reviewers
+  # land on relevant context without manual digging — useful as the
+  # multi-repo migration tree (#80) accumulates.
+  related_issues: true
+  related_prs: true
+
+  # Suggest labels in the review summary based on the change. Auto-apply is
+  # off until we define a label taxonomy on the repo (target-repo labels per
+  # #87, area labels, etc.); enable then.
+  suggested_labels: true
+  auto_apply_labels: false
+
+  path_filters:
+    - "!target/**"
+    - "!original/**"
+
+  path_instructions:
+    - path: "crates/nwg-common/src/compositor/**"
+      instructions: |
+        Compositor abstraction layer. Verify:
+        - All IPC goes through the Compositor trait, never direct hyprland calls from binaries
+        - WmEvent variants are handled exhaustively in match arms
+        - MonitorChanged events parsed for both Hyprland (monitoraddedv2/monitorremoved) and Sway (output events)
+        - Sway i3-ipc message parsing validates magic bytes and payload size
+        - No command injection in hyprctl/swaymsg dispatch strings
+        - Thread safety: Rc<dyn Compositor> must never cross thread boundaries
+        - WmEventStream must be Send (used in background threads)
+        - Wm* types (WmClient, WmMonitor, WmWorkspace, WmEvent) are public API and #[non_exhaustive]. External crates must construct via `Default::default()` + the `with_*` fluent setters — never via struct literal. Same-crate (nwg-common) construction sites keep using struct literals; that's unaffected by the attribute.
+    - path: "crates/nwg-common/src/launch.rs"
+      instructions: |
+        App launching pipeline. Verify:
+        - All spawned Child processes are passed to reap_child() or spawn_and_forget() — no dropped Children
+        - shell_words::split() used for POSIX command splitting (not split_whitespace)
+        - Quotes preserved end-to-end (PR #11 fix)
+        - extract_env_prefix validates POSIX identifiers (no digit-start keys)
+        - Mutex guard dropped before any blocking wait in enqueue_or_reap_sync
+    - path: "crates/nwg-common/src/desktop/**"
+      instructions: |
+        Desktop file parsing and icon resolution. Verify:
+        - strip_field_codes removes only freedesktop-spec field codes (%u, %F, etc.)
+        - %% is collapsed to literal %
+        - Exec field quotes are preserved (never stripped at parse time)
+        - Malformed .desktop files handled gracefully (no panics)
+    - path: "crates/nwg-common/src/process.rs"
+      instructions: |
+        Process utility for --dump-args. Verify:
+        - Uses args_os() not args() to avoid panic on non-Unicode argv
+        - parse_cmdline_bytes only strips trailing NUL, preserves empty middle args
+        - shell_words::join() for safe quoting (handles spaces, nested quotes, single quotes)
+    - path: "crates/nwg-common/src/signals.rs"
+      instructions: |
+        RT signal handling via raw libc. Verify:
+        - sigrtmin() queries libc::SIGRTMIN() at runtime (not hardcoded 34) — musl reserves more NPTL slots than glibc
+        - Every unsafe block has a SAFETY comment explaining invariants
+        - sigemptyset/sigaddset/pthread_sigmask return codes are checked, not silently dropped
+        - Only async-signal-safe operations in handler paths (sigterm_handler uses libc::_exit)
+        - WindowCommand mapping covers SIGUSR1 (legacy) → Toggle compatibility
+    - path: "crates/nwg-dock/src/ui/**"
+      instructions: |
+        Dock UI layer. Verify:
+        - GestureDrag uses DRAG_CLAIM_THRESHOLD before calling set_state(Claimed)
+        - Threshold only gates initial transition — once dragging, all motion processed
+        - No index-based window↔monitor mapping (use output_name from MonitorDock)
+        - Autohide respects drag_source_index and popover_open state
+        - All UI dimensions use named constants from constants.rs
+        - Rc/Weak patterns: watch for reference cycles in rebuild_fn
+    - path: "crates/nwg-drawer/src/ui/**"
+      instructions: |
+        Drawer UI layer. Verify:
+        - All well/category/search builders use WellContext (not 7+ individual params)
+        - Pin/unpin operations rollback on save failure
+        - Math evaluation uses the exmex crate (migrated off meval in #64; safe parser, no eval/shell)
+        - Inline math results don't trap keyboard focus (vbox/row/label non-focusable)
+        - CSS dimensions use named constants from constants.rs
+        - launch_desktop_entry() for app launches (not inline strip/prepend/launch)
+    - path: "crates/nwg-notifications/src/**"
+      instructions: |
+        Notification daemon. Verify:
+        - D-Bus server uses gio bus_own_name (no async bridge)
+        - Backdrop windows have non-zero opacity for input delivery
+        - ActionInvoked signals emitted correctly on action button click
+        - DND state changes fire on_state_change callback
+        - Protocol compliance with Desktop Notifications Specification
+    - path: ".github/workflows/*.y*ml"
+      instructions: |
+        GitHub Actions workflows. Verify:
+        - permissions: block scoped to the minimum (typically `contents: read`); never default-permissive
+        - All third-party actions pinned by full commit SHA, never floating tags (e.g., `actions/checkout@<sha> # v4`, not `@v4`)
+        - No untrusted input (issue/PR title, body, head ref, commit message) interpolated directly into `run:` blocks; route via `env:` if needed
+        - Reasonable `timeout-minutes` set so a hung job doesn't burn an hour of runner time
+        - System-dependency installs (`apt-get install`) use `--no-install-recommends` to keep image lean
+    - path: ".github/actions/**/action.y*ml"
+      instructions: |
+        GitHub composite / reusable actions. Same security posture as the
+        calling workflows — verify:
+        - All third-party actions pinned by full commit SHA, never floating tags
+        - No untrusted input interpolated directly into `run:` blocks; route via `env:` (`shell: bash` steps are equally vulnerable to injection)
+        - Every `run:` step explicitly declares `shell: bash` (composite-action requirement; missing shell silently breaks the step)
+        - Pinned external sources (git clones, downloads) use immutable refs — commit SHAs for git, checksum verification for binaries
+        - Shell steps quote interpolations defensively (`"$VAR"`, not `$VAR`) and fail fast (`set -e` or `||` chains on critical steps)
+        - System-dependency installs (`apt-get install`) use `--no-install-recommends` to keep image lean
+    - path: "Makefile"
+      instructions: |
+        Build system. Verify:
+        - make upgrade captures running process args via --dump-args before stopping
+        - Uses target/release/ binaries for --dump-args (not installed binaries which may be old)
+        - Fail-fast with || exit 1 on critical steps
+        - All PIDs captured per binary (not just first) for multi-instance support
+    - path: "**/CHANGELOG.md"
+      instructions: |
+        Per-crate CHANGELOGs follow Keep a Changelog (https://keepachangelog.com).
+        Verify:
+        - H1 title `# Changelog` (not H2)
+        - `## [x.y.z] — Unreleased` section present and active
+        - User-visible bullets only — implementation-detail churn doesn't earn an entry
+        - Bullets bucketed under Added / Changed / Fixed / Removed / Deprecated as applicable
+        - Per epic #80 §3.4 the project is in 0.x: breaking changes ship as MINOR bumps (0.3 → 0.4), not major
+    - path: "**/Cargo.toml"
+      instructions: |
+        Cargo manifests. Verify:
+        - For publishable crates (the four crates that target crates.io): `description`, `license`, `repository`, `readme`, `keywords`, `categories`, `rust-version` are all explicit (not workspace-inherited) so the published manifest is self-contained
+        - `categories` values must be valid crates.io slugs (verify against https://crates.io/api/v1/category_slugs — e.g. `config` is valid, `configuration` is not)
+        - Dependency version specs follow the project's pinning style (workspace-inherited where possible; explicit `nwg-common = "0.3"` for binaries consuming the published library)
+        - Avoid wildcard `*` versions
+        - `Cargo.lock` is committed for both the library and the binaries (cargo-audit reproducibility)
+    - path: "crates/**"
+      instructions: |
+        General rules for all crates:
+        - No unwrap() in library code (use proper error handling)
+        - Log errors, never silently discard with let _ = (except optional wl-copy)
+        - No #[allow(dead_code)] — all code should be used
+        - No magic numbers — use named constants or inline comments
+        - Unsafe code only in signals.rs/listeners.rs with SAFETY comments
+        - Tests at bottom of file in #[cfg(test)] mod tests, test behavior not implementation
+
+  tools:
+    clippy:
+      enabled: true
+    gitleaks:
+      enabled: true
+    markdownlint:
+      enabled: true
+    yamllint:
+      enabled: true
+    actionlint:
+      enabled: true
+    shellcheck:
+      enabled: true
+    osvScanner:
+      enabled: true
+    opengrep:
+      enabled: true
+    # English prose check for long-form docs (README, CHANGELOG, SECURITY.md,
+    # CLAUDE.md, doc-comments). Catches typos, awkward phrasing, missing
+    # punctuation in user-facing text without being noisy on code.
+    languagetool:
+      enabled: true
+    # NOTE: taplo (TOML formatter/linter) is not supported by CodeRabbit's
+    # schema v2 (verified against https://coderabbit.ai/integrations/schema.v2.json
+    # — additionalProperties is false and taplo isn't in the 50-tool list).
+    # If we want Cargo.toml linting, add it to `make lint` locally or as its
+    # own CI workflow; CodeRabbit catches Cargo.toml issues via the
+    # **/Cargo.toml path instructions above.
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: "local"
+  issues:
+    scope: "local"
+  pull_requests:
+    scope: "local"
+  web_search:
+    enabled: true
+  code_guidelines:
+    enabled: true
