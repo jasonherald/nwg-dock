@@ -60,7 +60,7 @@ sudo make install
 Writes:
 - `nwg-dock` → `/usr/local/bin/nwg-dock`
 - Legacy symlink → `/usr/local/bin/nwg-dock-hyprland` (so old autostart lines keep working)
-- Data files → `/usr/local/share/nwg-dock/`
+- Data files → `/usr/local/share/nwg-dock-hyprland/` (path kept on the Go-predecessor convention so existing users' `~/.config/nwg-dock-hyprland/style.css` customizations keep resolving — a full-rename migration is planned for a later minor)
 
 **No-sudo, dev workflow (useful when working from a clone):**
 
