@@ -244,10 +244,10 @@ upgrade: build-release
 		RUNNING_INFO="$$(mktemp)" || exit 1; \
 		trap 'rm -f "$$ARGS_FILE" "$$RUNNING_INFO"' EXIT; \
 		for pid in $$RUNNING_PIDS; do \
-			START_TIME="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+			START_TIME="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 			test -n "$$START_TIME" || continue; \
 			if ! DUMP_OUT="$$(target/release/$(BIN_NAME) --dump-args "$$pid" 2>/dev/null)"; then \
-				ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+				ACTUAL_START="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 				ACTUAL_EXE="$$(readlink -f "/proc/$$pid/exe" 2>/dev/null || true)"; \
 				if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ] && \
 				   [ "$$ACTUAL_EXE" = "$$INSTALL_TARGET_REAL" ]; then \
@@ -262,7 +262,7 @@ upgrade: build-release
 		$(MAKE) install-bin install-data || exit 1; \
 		VALIDATED_PIDS=""; \
 		while IFS=' ' read -r pid start_time; do \
-			ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+			ACTUAL_START="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 			if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$start_time" ]; then \
 				VALIDATED_PIDS="$$VALIDATED_PIDS $$pid"; \
 			else \
@@ -276,7 +276,7 @@ upgrade: build-release
 			STILL_RUNNING=""; \
 			for pid in $$VALIDATED_PIDS; do \
 				START_TIME="$$(grep "^$$pid " "$$RUNNING_INFO" | awk '{print $$2}')"; \
-				ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+				ACTUAL_START="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 				if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ]; then \
 					STILL_RUNNING="$$STILL_RUNNING $$pid"; \
 				fi; \
@@ -288,7 +288,7 @@ upgrade: build-release
 				FINAL_ALIVE=""; \
 				for pid in $$STILL_RUNNING; do \
 					START_TIME="$$(grep "^$$pid " "$$RUNNING_INFO" | awk '{print $$2}')"; \
-					ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+					ACTUAL_START="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 					if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ]; then \
 						FINAL_ALIVE="$$FINAL_ALIVE $$pid"; \
 					fi; \
