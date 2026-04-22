@@ -256,34 +256,34 @@ upgrade: build-release
 				fi; \
 				continue; \
 			fi; \
-			printf "%s\t%s\n" "$$pid" "$$DUMP_OUT" >> "$$ARGS_FILE"; \
-			echo "$$pid $$START_TIME" >> "$$RUNNING_INFO"; \
+			printf "%s\t%s\n" "$$pid" "$$DUMP_OUT" >> "$$ARGS_FILE" || exit 1; \
+			echo "$$pid $$START_TIME" >> "$$RUNNING_INFO" || exit 1; \
 		done; \
 		$(MAKE) install-bin install-data || exit 1; \
 		VALIDATED_PIDS=""; \
 		while IFS=' ' read -r pid start_time; do \
 			ACTUAL_START="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 			if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$start_time" ]; then \
+				kill "$$pid" 2>/dev/null || true; \
 				VALIDATED_PIDS="$$VALIDATED_PIDS $$pid"; \
 			else \
 				echo "Skipping pid $$pid — no longer our dock (starttime changed or process exited between capture and kill)"; \
 			fi; \
 		done < "$$RUNNING_INFO"; \
 		if [ -n "$$VALIDATED_PIDS" ]; then \
-			echo "Stopping running instance(s):$$VALIDATED_PIDS"; \
-			kill $$VALIDATED_PIDS 2>/dev/null || true; \
+			echo "Sent SIGTERM to:$$VALIDATED_PIDS"; \
 			sleep 1; \
 			STILL_RUNNING=""; \
 			for pid in $$VALIDATED_PIDS; do \
 				START_TIME="$$(grep "^$$pid " "$$RUNNING_INFO" | awk '{print $$2}')"; \
 				ACTUAL_START="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 				if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ]; then \
+					kill -9 "$$pid" 2>/dev/null || true; \
 					STILL_RUNNING="$$STILL_RUNNING $$pid"; \
 				fi; \
 			done; \
 			if [ -n "$$STILL_RUNNING" ]; then \
-				echo "Warning: still running after SIGTERM:$$STILL_RUNNING — escalating to SIGKILL"; \
-				kill -9 $$STILL_RUNNING 2>/dev/null || true; \
+				echo "Escalated to SIGKILL:$$STILL_RUNNING"; \
 				sleep 1; \
 				FINAL_ALIVE=""; \
 				for pid in $$STILL_RUNNING; do \
