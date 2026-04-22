@@ -214,7 +214,15 @@ upgrade: build-release
 		INSTALL_TARGET_REAL="$$(readlink -f "$$INSTALL_TARGET" 2>/dev/null || echo "$$INSTALL_TARGET")"; \
 		for pid in $$RUNNING_PIDS; do \
 			RUNNING_EXE="$$(readlink -f "/proc/$$pid/exe" 2>/dev/null)"; \
-			test -n "$$RUNNING_EXE" || continue; \
+			if [ -z "$$RUNNING_EXE" ]; then \
+				if [ -d "/proc/$$pid" ]; then \
+					echo "ERROR: unable to resolve /proc/$$pid/exe for live dock pid $$pid"; \
+					echo "       (process is alive but its exe symlink is unreadable — refusing to proceed"; \
+					echo "        without install-target validation)"; \
+					exit 1; \
+				fi; \
+				continue; \
+			fi; \
 			if [ "$$RUNNING_EXE" != "$$INSTALL_TARGET_REAL" ]; then \
 				RUNNING_BINDIR="$$(dirname "$$RUNNING_EXE")"; \
 				RUNNING_PREFIX="$$(dirname "$$RUNNING_BINDIR")"; \
