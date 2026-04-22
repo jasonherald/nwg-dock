@@ -244,47 +244,51 @@ upgrade: build-release
 		RUNNING_INFO="$$(mktemp)" || exit 1; \
 		trap 'rm -f "$$ARGS_FILE" "$$RUNNING_INFO"' EXIT; \
 		for pid in $$RUNNING_PIDS; do \
-			START_TIME="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+			START_TIME="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 			test -n "$$START_TIME" || continue; \
-			if ! target/release/$(BIN_NAME) --dump-args "$$pid" >> "$$ARGS_FILE"; then \
-				if [ -e "/proc/$$pid/exe" ]; then \
+			if ! DUMP_OUT="$$(target/release/$(BIN_NAME) --dump-args "$$pid" 2>/dev/null)"; then \
+				ACTUAL_START="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
+				ACTUAL_EXE="$$(readlink -f "/proc/$$pid/exe" 2>/dev/null || true)"; \
+				if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ] && \
+				   [ "$$ACTUAL_EXE" = "$$INSTALL_TARGET_REAL" ]; then \
 					echo "ERROR: --dump-args failed for live dock pid $$pid"; \
 					exit 1; \
 				fi; \
 				continue; \
 			fi; \
-			echo "$$pid $$START_TIME" >> "$$RUNNING_INFO"; \
+			printf "%s\t%s\n" "$$pid" "$$DUMP_OUT" >> "$$ARGS_FILE" || exit 1; \
+			echo "$$pid $$START_TIME" >> "$$RUNNING_INFO" || exit 1; \
 		done; \
 		$(MAKE) install-bin install-data || exit 1; \
 		VALIDATED_PIDS=""; \
 		while IFS=' ' read -r pid start_time; do \
-			ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+			ACTUAL_START="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 			if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$start_time" ]; then \
+				kill "$$pid" 2>/dev/null || true; \
 				VALIDATED_PIDS="$$VALIDATED_PIDS $$pid"; \
 			else \
 				echo "Skipping pid $$pid — no longer our dock (starttime changed or process exited between capture and kill)"; \
 			fi; \
 		done < "$$RUNNING_INFO"; \
 		if [ -n "$$VALIDATED_PIDS" ]; then \
-			echo "Stopping running instance(s):$$VALIDATED_PIDS"; \
-			kill $$VALIDATED_PIDS 2>/dev/null || true; \
+			echo "Sent SIGTERM to:$$VALIDATED_PIDS"; \
 			sleep 1; \
 			STILL_RUNNING=""; \
 			for pid in $$VALIDATED_PIDS; do \
 				START_TIME="$$(grep "^$$pid " "$$RUNNING_INFO" | awk '{print $$2}')"; \
-				ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+				ACTUAL_START="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 				if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ]; then \
+					kill -9 "$$pid" 2>/dev/null || true; \
 					STILL_RUNNING="$$STILL_RUNNING $$pid"; \
 				fi; \
 			done; \
 			if [ -n "$$STILL_RUNNING" ]; then \
-				echo "Warning: still running after SIGTERM:$$STILL_RUNNING — escalating to SIGKILL"; \
-				kill -9 $$STILL_RUNNING 2>/dev/null || true; \
+				echo "Escalated to SIGKILL:$$STILL_RUNNING"; \
 				sleep 1; \
 				FINAL_ALIVE=""; \
 				for pid in $$STILL_RUNNING; do \
 					START_TIME="$$(grep "^$$pid " "$$RUNNING_INFO" | awk '{print $$2}')"; \
-					ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+					ACTUAL_START="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 					if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ]; then \
 						FINAL_ALIVE="$$FINAL_ALIVE $$pid"; \
 					fi; \
@@ -295,11 +299,13 @@ upgrade: build-release
 				}; \
 			fi; \
 		fi; \
-		if [ -s "$$ARGS_FILE" ]; then \
-			while IFS= read -r args; do \
+		if [ -n "$$VALIDATED_PIDS" ] && [ -s "$$ARGS_FILE" ]; then \
+			for pid in $$VALIDATED_PIDS; do \
+				args="$$(awk -v p="$$pid" 'BEGIN{FS="\t"} $$1==p{sub(/^[^\t]*\t/, ""); print; exit}' "$$ARGS_FILE")"; \
+				test -n "$$args" || continue; \
 				echo "Restarting with captured args: $$args"; \
 				setsid sh -c "$$args" </dev/null >/dev/null 2>&1 & \
-			done < "$$ARGS_FILE"; \
+			done; \
 		fi; \
 	else \
 		echo "No running instance — installing without restart"; \
