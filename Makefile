@@ -157,19 +157,67 @@ setup-sway:
 #
 # `pidof -c` matches against the binary's comm field, which stays the
 # same across the symlink alias — so we pass both names to cover users
-# still running via the `nwg-dock-hyprland` symlink.
+# still running via the `nwg-dock-hyprland` symlink. The output is
+# pipelined through `sort -u` to dedupe — a process launched via the
+# symlink gets reported under both names, which would otherwise cause
+# --dump-args + kill + restart to run twice on the same pid.
+#
+# Install-target validation (issue #35): before killing anything,
+# resolve /proc/$PID/exe for each running dock and compare against
+# where this upgrade would install ($(BINDIR)/$(BIN_NAME)). If they
+# don't match — usually because the user installed to ~/.cargo/bin
+# but invoked upgrade without re-passing PREFIX/BINDIR, so we'd try
+# to install to /usr/local and fail on permission — we abort with a
+# helpful error BEFORE touching the dock. Previously the recipe
+# killed the dock first and then failed the install, leaving the
+# desktop with no visible dock and no binary update.
+#
+# Symlink handling: /proc/$pid/exe is a kernel-resolved canonical
+# path, not a symlink. `readlink -f` on both sides (running exe +
+# install target) ensures the comparison works even when the user
+# launched via the `nwg-dock-hyprland` alias (the alias resolves to
+# the nwg-dock binary's real path, which is what /proc reports).
+#
+# Atomicity: recipe order is validate → capture args → install →
+# kill → restart. Install happens while the dock is still running
+# (Linux's mmap semantics make this safe — `install` unlinks the
+# destination and writes a new file; the running process's loaded
+# pages survive intact until the process exits). If install fails,
+# the dock is never killed.
 upgrade: build-release
-	@RUNNING_PIDS="$$(pidof -c $(BIN_NAME) $(LEGACY_BIN_NAME) 2>/dev/null || true)"; \
+	@RUNNING_PIDS="$$(pidof -c $(BIN_NAME) $(LEGACY_BIN_NAME) 2>/dev/null | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/ $$//' || true)"; \
 	if [ -n "$$RUNNING_PIDS" ]; then \
+		INSTALL_TARGET="$(DESTDIR)$(BINDIR)/$(BIN_NAME)"; \
+		INSTALL_TARGET_REAL="$$(readlink -f "$$INSTALL_TARGET" 2>/dev/null || echo "$$INSTALL_TARGET")"; \
+		for pid in $$RUNNING_PIDS; do \
+			RUNNING_EXE="$$(readlink -f "/proc/$$pid/exe" 2>/dev/null)"; \
+			test -n "$$RUNNING_EXE" || continue; \
+			if [ "$$RUNNING_EXE" != "$$INSTALL_TARGET_REAL" ]; then \
+				RUNNING_BINDIR="$$(dirname "$$RUNNING_EXE")"; \
+				RUNNING_PREFIX="$$(dirname "$$RUNNING_BINDIR")"; \
+				echo "ERROR: running dock (pid $$pid) is installed at"; \
+				echo "         $$RUNNING_EXE"; \
+				echo "       but 'make upgrade' would install to"; \
+				echo "         $$INSTALL_TARGET"; \
+				echo ""; \
+				echo "       Dock NOT killed — a prefix-mismatched upgrade would leave"; \
+				echo "       you with no dock on your desktop and no new binary."; \
+				echo ""; \
+				echo "       Re-run with PREFIX/BINDIR matching the running binary:"; \
+				echo "         make upgrade PREFIX=$$RUNNING_PREFIX BINDIR=$$RUNNING_BINDIR"; \
+				echo "       (or stop the dock manually and re-run make install)."; \
+				exit 1; \
+			fi; \
+		done; \
 		ARGS_FILE="$$(mktemp)" || exit 1; \
 		trap 'rm -f "$$ARGS_FILE"' EXIT; \
 		for pid in $$RUNNING_PIDS; do \
-			target/release/$(BIN_NAME) --dump-args "$$pid" >> "$$ARGS_FILE" || exit 1; \
+			target/release/$(BIN_NAME) --dump-args "$$pid" >> "$$ARGS_FILE" || continue; \
 		done; \
+		$(MAKE) install-bin install-data || exit 1; \
 		echo "Stopping running instance(s): $$RUNNING_PIDS"; \
 		kill $$RUNNING_PIDS 2>/dev/null || true; \
 		sleep 1; \
-		$(MAKE) install-bin install-data || exit 1; \
 		if [ -s "$$ARGS_FILE" ]; then \
 			while IFS= read -r args; do \
 				echo "Restarting with captured args: $$args"; \
