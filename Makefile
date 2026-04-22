@@ -184,6 +184,29 @@ setup-sway:
 # destination and writes a new file; the running process's loaded
 # pages survive intact until the process exits). If install fails,
 # the dock is never killed.
+#
+# PID identity validation (CodeRabbit follow-up): capture
+# `/proc/$PID/stat` field 22 (starttime — clock ticks since boot)
+# alongside each pid at discovery; re-verify before SIGTERM and
+# SIGKILL. Starttime is kernel-authoritative and unique per
+# (pid, boot), so a reused pid with a different process attached
+# gets dropped from the kill list rather than SIGKILLed blindly.
+#
+# SIGKILL escalation + refuse-restart-on-failure (CodeRabbit
+# outside-diff finding): old code did `kill $PIDS || true; sleep 1;
+# restart` — if SIGTERM silently failed or a process ignored it,
+# we'd start a new dock alongside the old one (2 docks; singleton
+# lockfile would prevent the second from staying alive but it's
+# still wrong). Now: after SIGTERM+sleep, check each pid's
+# starttime; still-alive pids get SIGKILL; if any survive SIGKILL
+# the recipe fails BEFORE restart so you never end up with two
+# dock instances fighting for the layer surface.
+#
+# --dump-args failure handling: a failure is only swallowed when
+# the pid has actually disappeared (no `/proc/$PID/exe`). If
+# --dump-args fails on a still-live dock that's a real bug —
+# fail-fast with an explicit error rather than silently killing
+# the dock without capturing its args.
 upgrade: build-release
 	@RUNNING_PIDS="$$(pidof -c $(BIN_NAME) $(LEGACY_BIN_NAME) 2>/dev/null | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/ $$//' || true)"; \
 	if [ -n "$$RUNNING_PIDS" ]; then \
@@ -210,14 +233,60 @@ upgrade: build-release
 			fi; \
 		done; \
 		ARGS_FILE="$$(mktemp)" || exit 1; \
-		trap 'rm -f "$$ARGS_FILE"' EXIT; \
+		RUNNING_INFO="$$(mktemp)" || exit 1; \
+		trap 'rm -f "$$ARGS_FILE" "$$RUNNING_INFO"' EXIT; \
 		for pid in $$RUNNING_PIDS; do \
-			target/release/$(BIN_NAME) --dump-args "$$pid" >> "$$ARGS_FILE" || continue; \
+			START_TIME="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+			test -n "$$START_TIME" || continue; \
+			if ! target/release/$(BIN_NAME) --dump-args "$$pid" >> "$$ARGS_FILE"; then \
+				if [ -e "/proc/$$pid/exe" ]; then \
+					echo "ERROR: --dump-args failed for live dock pid $$pid"; \
+					exit 1; \
+				fi; \
+				continue; \
+			fi; \
+			echo "$$pid $$START_TIME" >> "$$RUNNING_INFO"; \
 		done; \
 		$(MAKE) install-bin install-data || exit 1; \
-		echo "Stopping running instance(s): $$RUNNING_PIDS"; \
-		kill $$RUNNING_PIDS 2>/dev/null || true; \
-		sleep 1; \
+		VALIDATED_PIDS=""; \
+		while IFS=' ' read -r pid start_time; do \
+			ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+			if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$start_time" ]; then \
+				VALIDATED_PIDS="$$VALIDATED_PIDS $$pid"; \
+			else \
+				echo "Skipping pid $$pid — no longer our dock (starttime changed or process exited between capture and kill)"; \
+			fi; \
+		done < "$$RUNNING_INFO"; \
+		if [ -n "$$VALIDATED_PIDS" ]; then \
+			echo "Stopping running instance(s):$$VALIDATED_PIDS"; \
+			kill $$VALIDATED_PIDS 2>/dev/null || true; \
+			sleep 1; \
+			STILL_RUNNING=""; \
+			for pid in $$VALIDATED_PIDS; do \
+				START_TIME="$$(grep "^$$pid " "$$RUNNING_INFO" | awk '{print $$2}')"; \
+				ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+				if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ]; then \
+					STILL_RUNNING="$$STILL_RUNNING $$pid"; \
+				fi; \
+			done; \
+			if [ -n "$$STILL_RUNNING" ]; then \
+				echo "Warning: still running after SIGTERM:$$STILL_RUNNING — escalating to SIGKILL"; \
+				kill -9 $$STILL_RUNNING 2>/dev/null || true; \
+				sleep 1; \
+				FINAL_ALIVE=""; \
+				for pid in $$STILL_RUNNING; do \
+					START_TIME="$$(grep "^$$pid " "$$RUNNING_INFO" | awk '{print $$2}')"; \
+					ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+					if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ]; then \
+						FINAL_ALIVE="$$FINAL_ALIVE $$pid"; \
+					fi; \
+				done; \
+				test -z "$$FINAL_ALIVE" || { \
+					echo "ERROR: failed to stop$$FINAL_ALIVE after SIGKILL; refusing to restart while old dock still running"; \
+					exit 1; \
+				}; \
+			fi; \
+		fi; \
 		if [ -s "$$ARGS_FILE" ]; then \
 			while IFS= read -r args; do \
 				echo "Restarting with captured args: $$args"; \
