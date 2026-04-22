@@ -49,7 +49,7 @@ pub enum Layer {
 
 /// A macOS-style dock for Hyprland/Sway.
 #[derive(Parser, Debug, Clone)]
-#[command(name = "nwg-dock-hyprland", version, about)]
+#[command(name = "nwg-dock", version, about)]
 pub struct DockConfig {
     /// Alignment in full width/height
     #[arg(short = 'a', long, value_enum, default_value_t = Alignment::Center)]
