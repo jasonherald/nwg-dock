@@ -157,19 +157,144 @@ setup-sway:
 #
 # `pidof -c` matches against the binary's comm field, which stays the
 # same across the symlink alias — so we pass both names to cover users
-# still running via the `nwg-dock-hyprland` symlink.
+# still running via the `nwg-dock-hyprland` symlink. The output is
+# pipelined through `sort -u` to dedupe — a process launched via the
+# symlink gets reported under both names, which would otherwise cause
+# --dump-args + kill + restart to run twice on the same pid.
+#
+# Install-target validation (issue #35): before killing anything,
+# resolve /proc/$PID/exe for each running dock and compare against
+# where this upgrade would install ($(BINDIR)/$(BIN_NAME)). If they
+# don't match — usually because the user installed to ~/.cargo/bin
+# but invoked upgrade without re-passing PREFIX/BINDIR, so we'd try
+# to install to /usr/local and fail on permission — we abort with a
+# helpful error BEFORE touching the dock. Previously the recipe
+# killed the dock first and then failed the install, leaving the
+# desktop with no visible dock and no binary update.
+#
+# Symlink handling: /proc/$pid/exe is a kernel-resolved canonical
+# path, not a symlink. `readlink -f` on both sides (running exe +
+# install target) ensures the comparison works even when the user
+# launched via the `nwg-dock-hyprland` alias (the alias resolves to
+# the nwg-dock binary's real path, which is what /proc reports).
+#
+# Atomicity: recipe order is validate → capture args → install →
+# kill → restart. Install happens while the dock is still running
+# (Linux's mmap semantics make this safe — `install` unlinks the
+# destination and writes a new file; the running process's loaded
+# pages survive intact until the process exits). If install fails,
+# the dock is never killed.
+#
+# PID identity validation (CodeRabbit follow-up): capture
+# `/proc/$PID/stat` field 22 (starttime — clock ticks since boot)
+# alongside each pid at discovery; re-verify before SIGTERM and
+# SIGKILL. Starttime is kernel-authoritative and unique per
+# (pid, boot), so a reused pid with a different process attached
+# gets dropped from the kill list rather than SIGKILLed blindly.
+#
+# SIGKILL escalation + refuse-restart-on-failure (CodeRabbit
+# outside-diff finding): old code did `kill $PIDS || true; sleep 1;
+# restart` — if SIGTERM silently failed or a process ignored it,
+# we'd start a new dock alongside the old one (2 docks; singleton
+# lockfile would prevent the second from staying alive but it's
+# still wrong). Now: after SIGTERM+sleep, check each pid's
+# starttime; still-alive pids get SIGKILL; if any survive SIGKILL
+# the recipe fails BEFORE restart so you never end up with two
+# dock instances fighting for the layer surface.
+#
+# --dump-args failure handling: a failure is only swallowed when
+# the pid has actually disappeared (no `/proc/$PID/exe`). If
+# --dump-args fails on a still-live dock that's a real bug —
+# fail-fast with an explicit error rather than silently killing
+# the dock without capturing its args.
 upgrade: build-release
-	@RUNNING_PIDS="$$(pidof -c $(BIN_NAME) $(LEGACY_BIN_NAME) 2>/dev/null || true)"; \
+	@RUNNING_PIDS="$$(pidof -c $(BIN_NAME) $(LEGACY_BIN_NAME) 2>/dev/null | tr ' ' '\n' | sort -u | tr '\n' ' ' | sed 's/ $$//' || true)"; \
 	if [ -n "$$RUNNING_PIDS" ]; then \
-		ARGS_FILE="$$(mktemp)" || exit 1; \
-		trap 'rm -f "$$ARGS_FILE"' EXIT; \
+		INSTALL_TARGET="$(DESTDIR)$(BINDIR)/$(BIN_NAME)"; \
+		INSTALL_TARGET_REAL="$$(readlink -f "$$INSTALL_TARGET" 2>/dev/null || echo "$$INSTALL_TARGET")"; \
 		for pid in $$RUNNING_PIDS; do \
-			target/release/$(BIN_NAME) --dump-args "$$pid" >> "$$ARGS_FILE" || exit 1; \
+			RUNNING_EXE="$$(readlink -f "/proc/$$pid/exe" 2>/dev/null)"; \
+			if [ -z "$$RUNNING_EXE" ]; then \
+				if [ -d "/proc/$$pid" ]; then \
+					echo "ERROR: unable to resolve /proc/$$pid/exe for live dock pid $$pid"; \
+					echo "       (process is alive but its exe symlink is unreadable — refusing to proceed"; \
+					echo "        without install-target validation)"; \
+					exit 1; \
+				fi; \
+				continue; \
+			fi; \
+			if [ "$$RUNNING_EXE" != "$$INSTALL_TARGET_REAL" ]; then \
+				RUNNING_BINDIR="$$(dirname "$$RUNNING_EXE")"; \
+				RUNNING_PREFIX="$$(dirname "$$RUNNING_BINDIR")"; \
+				echo "ERROR: running dock (pid $$pid) is installed at"; \
+				echo "         $$RUNNING_EXE"; \
+				echo "       but 'make upgrade' would install to"; \
+				echo "         $$INSTALL_TARGET"; \
+				echo ""; \
+				echo "       Dock NOT killed — a prefix-mismatched upgrade would leave"; \
+				echo "       you with no dock on your desktop and no new binary."; \
+				echo ""; \
+				echo "       Re-run with PREFIX/BINDIR matching the running binary:"; \
+				echo "         make upgrade PREFIX=$$RUNNING_PREFIX BINDIR=$$RUNNING_BINDIR"; \
+				echo "       (or stop the dock manually and re-run make install)."; \
+				exit 1; \
+			fi; \
 		done; \
-		echo "Stopping running instance(s): $$RUNNING_PIDS"; \
-		kill $$RUNNING_PIDS 2>/dev/null || true; \
-		sleep 1; \
+		ARGS_FILE="$$(mktemp)" || exit 1; \
+		RUNNING_INFO="$$(mktemp)" || exit 1; \
+		trap 'rm -f "$$ARGS_FILE" "$$RUNNING_INFO"' EXIT; \
+		for pid in $$RUNNING_PIDS; do \
+			START_TIME="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+			test -n "$$START_TIME" || continue; \
+			if ! target/release/$(BIN_NAME) --dump-args "$$pid" >> "$$ARGS_FILE"; then \
+				if [ -e "/proc/$$pid/exe" ]; then \
+					echo "ERROR: --dump-args failed for live dock pid $$pid"; \
+					exit 1; \
+				fi; \
+				continue; \
+			fi; \
+			echo "$$pid $$START_TIME" >> "$$RUNNING_INFO"; \
+		done; \
 		$(MAKE) install-bin install-data || exit 1; \
+		VALIDATED_PIDS=""; \
+		while IFS=' ' read -r pid start_time; do \
+			ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+			if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$start_time" ]; then \
+				VALIDATED_PIDS="$$VALIDATED_PIDS $$pid"; \
+			else \
+				echo "Skipping pid $$pid — no longer our dock (starttime changed or process exited between capture and kill)"; \
+			fi; \
+		done < "$$RUNNING_INFO"; \
+		if [ -n "$$VALIDATED_PIDS" ]; then \
+			echo "Stopping running instance(s):$$VALIDATED_PIDS"; \
+			kill $$VALIDATED_PIDS 2>/dev/null || true; \
+			sleep 1; \
+			STILL_RUNNING=""; \
+			for pid in $$VALIDATED_PIDS; do \
+				START_TIME="$$(grep "^$$pid " "$$RUNNING_INFO" | awk '{print $$2}')"; \
+				ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+				if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ]; then \
+					STILL_RUNNING="$$STILL_RUNNING $$pid"; \
+				fi; \
+			done; \
+			if [ -n "$$STILL_RUNNING" ]; then \
+				echo "Warning: still running after SIGTERM:$$STILL_RUNNING — escalating to SIGKILL"; \
+				kill -9 $$STILL_RUNNING 2>/dev/null || true; \
+				sleep 1; \
+				FINAL_ALIVE=""; \
+				for pid in $$STILL_RUNNING; do \
+					START_TIME="$$(grep "^$$pid " "$$RUNNING_INFO" | awk '{print $$2}')"; \
+					ACTUAL_START="$$(awk '{print $$22}' "/proc/$$pid/stat" 2>/dev/null || true)"; \
+					if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ]; then \
+						FINAL_ALIVE="$$FINAL_ALIVE $$pid"; \
+					fi; \
+				done; \
+				test -z "$$FINAL_ALIVE" || { \
+					echo "ERROR: failed to stop$$FINAL_ALIVE after SIGKILL; refusing to restart while old dock still running"; \
+					exit 1; \
+				}; \
+			fi; \
+		fi; \
 		if [ -s "$$ARGS_FILE" ]; then \
 			while IFS= read -r args; do \
 				echo "Restarting with captured args: $$args"; \
