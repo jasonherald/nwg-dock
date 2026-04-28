@@ -285,7 +285,11 @@ fn remove_zombie_docks(
                     "Rebuilding zombie dock for '{}' (layer-shell surface was destroyed)",
                     name
                 );
-                dock.win.close();
+                // destroy() not close(): see ui::window::dock_close_request_response.
+                // The dock vetoes every close-request to defeat compositor kill
+                // shortcuts, so close() here is a no-op and the old window would
+                // survive on top of the rebuilt one (#39 — double dock after swaylock).
+                dock.win.destroy();
                 false
             } else {
                 true
@@ -413,7 +417,10 @@ fn remove_orphaned_docks(
         per_monitor.borrow_mut().retain(|dock| {
             if &dock.output_name == name {
                 log::info!("Removing dock window for disconnected monitor: {}", name);
-                dock.win.close();
+                // destroy() not close() — the dock's close-request veto would
+                // otherwise leave the orphaned window alive. Same rationale as
+                // remove_zombie_docks above; see #39.
+                dock.win.destroy();
                 false
             } else {
                 true

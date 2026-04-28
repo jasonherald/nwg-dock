@@ -33,3 +33,13 @@ own repo + crates.io crate.
 
 - crates.io metadata (`description`, `readme`, `keywords`, `categories`,
   `repository`) wired up.
+
+### Fixed
+
+- Reconciliation now uses `destroy()` instead of `close()` to tear down
+  zombie and orphaned dock windows. The dock vetoes every close-request
+  to defeat compositor kill shortcuts (Hyprland `killactive`, `Super+Q`),
+  which made `close()` a no-op for our own teardown paths — old windows
+  survived on top of the freshly-rebuilt ones, producing a visible second
+  dock after `swaylock` unlock and other surface-destruction events
+  (#39).
