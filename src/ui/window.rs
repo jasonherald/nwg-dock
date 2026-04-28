@@ -2,11 +2,25 @@ use crate::config::{DockConfig, Layer, Position};
 use gtk4::prelude::*;
 use gtk4_layer_shell::LayerShell;
 
+/// Response the dock returns from every `close-request`.
+///
+/// Always `Propagation::Stop`, so compositor close shortcuts (Hyprland
+/// `killactive`, `Super+Q`, etc.) can't accidentally take the dock down.
+///
+/// Pinned as a named function so the contract has one canonical home and
+/// is unit-testable without a GTK display. The corollary — and the
+/// reason this is worth its own symbol — is that any code path that
+/// genuinely *wants* to tear a dock window down (zombie rebuild, monitor
+/// disconnect; see `listeners::remove_zombie_docks` /
+/// `listeners::remove_orphaned_docks`) must call `destroy()`, not
+/// `close()`, because `close()` is unconditionally vetoed here. See #39.
+pub fn dock_close_request_response() -> gtk4::glib::Propagation {
+    gtk4::glib::Propagation::Stop
+}
+
 /// Configures the main dock window with layer-shell properties.
 pub fn setup_dock_window(win: &gtk4::ApplicationWindow, config: &DockConfig) {
-    // Block compositor close requests (e.g. Hyprland killactive / Super+Q)
-    // so the dock can't be accidentally killed via keyboard shortcut.
-    win.connect_close_request(|_| gtk4::glib::Propagation::Stop);
+    win.connect_close_request(|_| dock_close_request_response());
     win.init_layer_shell();
     win.set_namespace(Some("nwg-dock-hyprland"));
 
@@ -64,5 +78,22 @@ pub fn orientations(config: &DockConfig) -> (gtk4::Orientation, gtk4::Orientatio
         (gtk4::Orientation::Horizontal, gtk4::Orientation::Vertical)
     } else {
         (gtk4::Orientation::Vertical, gtk4::Orientation::Horizontal)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pins the contract that creates issue #39: the dock vetoes every
+    /// `close-request`, which means `close()` is a no-op for our windows.
+    /// If this test is ever changed to expect `Propagation::Proceed`, the
+    /// `destroy()` calls in `listeners::remove_zombie_docks` and
+    /// `listeners::remove_orphaned_docks` can be folded back to `close()` —
+    /// but not before, because the zombie rebuild path would otherwise
+    /// leave the old window alive on top of the freshly-created one.
+    #[test]
+    fn close_request_is_always_vetoed() {
+        assert_eq!(dock_close_request_response(), gtk4::glib::Propagation::Stop);
     }
 }
