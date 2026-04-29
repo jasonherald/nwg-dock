@@ -130,6 +130,7 @@ install-data:
 	@echo "Installing data assets to $(DESTDIR)$(DATADIR)/$(DATA_APP_NAME)/"
 	install -d "$(DESTDIR)$(DATADIR)/$(DATA_APP_NAME)/images"
 	install -m 644 data/$(DATA_APP_NAME)/style.css "$(DESTDIR)$(DATADIR)/$(DATA_APP_NAME)/"
+	install -m 644 data/$(DATA_APP_NAME)/config.example.toml "$(DESTDIR)$(DATADIR)/$(DATA_APP_NAME)/"
 	install -m 644 data/$(DATA_APP_NAME)/images/*.svg "$(DESTDIR)$(DATADIR)/$(DATA_APP_NAME)/images/"
 
 uninstall:

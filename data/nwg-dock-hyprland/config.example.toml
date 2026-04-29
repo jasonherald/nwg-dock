@@ -1,0 +1,57 @@
+# nwg-dock configuration file
+#
+# Default location: $XDG_CONFIG_HOME/nwg-dock-hyprland/config.toml
+# Override with:    nwg-dock --config /path/to/config.toml
+#
+# Every key shown here is optional. Lines starting with # are comments.
+# CLI flags always override values in this file. To inspect what the dock
+# is currently using, run: nwg-dock --print-config
+#
+# Most fields hot-reload — edit, save, and the dock applies the change
+# immediately (with a desktop notification confirming success or
+# reporting a parse error). The following fields require the dock to
+# be restarted to take effect:
+#   multi, wm, autohide, resident, hotspot-layer, layer, exclusive
+# The dock will surface a "change applies on next restart" notification
+# when one of those is edited.
+
+[behavior]
+# autohide      = false       # show the dock only on cursor hotspot
+# resident      = false       # keep the dock alive but not auto-hidden
+# multi         = false       # allow multiple instances (one per monitor)
+# debug         = false       # verbose logging
+# wm            = "hyprland"  # force compositor: "hyprland" / "sway" / "uwsm"
+# hide-timeout  = 600         # ms after cursor leaves before hide
+# hotspot-delay = 20          # ms before hotspot triggers show
+# hotspot-layer = "overlay"   # "overlay" / "top" / "bottom"
+
+[layout]
+# position  = "bottom"        # "bottom" / "top" / "left" / "right"
+# alignment = "center"        # "start" / "center" / "end"
+# full      = false           # span the full edge length
+# mt        = 0               # margin top (px)
+# mb        = 0               # margin bottom (px)
+# ml        = 0               # margin left (px)
+# mr        = 0               # margin right (px)
+# output    = ""              # specific monitor name (e.g. "DP-1")
+# layer     = "overlay"       # "overlay" / "top" / "bottom"
+# exclusive = false           # reserve space (other windows tile around)
+
+[appearance]
+# icon-size        = 48
+# opacity          = 100      # 0-100; window background opacity
+# css-file         = "style.css"
+# launch-animation = false    # bouncing icon while an app starts
+
+[launcher]
+# launcher-cmd  = "nwg-drawer"
+# launcher-pos  = "end"       # where the launcher button sits in the dock
+# nolauncher    = false       # hide the launcher button entirely
+# ico           = ""          # alternative launcher icon name/path
+
+[filters]
+# Either a string ("steam firefox") or a TOML array (["steam", "firefox"]).
+# ignore-classes         = []
+# ignore-workspaces      = []
+# num-ws                 = 10
+# no-fullscreen-suppress = false
