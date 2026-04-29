@@ -216,7 +216,7 @@ inotify event → debounce 100ms → load_config_file(path)
                                           ↓
                                  new_dock_config
                                           ↓
-                       apply_config_change(state, new, per_monitor, rebuild)
+                       apply_config_change(new, state, per_monitor, rebuild)
         ┌─────────────────────────────────┼─────────────────────────────────┐
         ↓                                  ↓                                  ↓
   RestartRequired                    Applicable                          NoChange
