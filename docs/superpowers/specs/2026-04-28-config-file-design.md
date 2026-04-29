@@ -1,6 +1,6 @@
 # Config file for nwg-dock — design
 
-**Status:** Approved 2026-04-28. Implementation pending.
+**Status:** Approved 2026-04-28. Implemented in PR #41 (`feat/config-file`).
 **Issue:** [jasonherald/nwg-dock#33](https://github.com/jasonherald/nwg-dock/issues/33).
 
 ## Summary
@@ -47,7 +47,7 @@ These were reached through Q&A; recording them here so the implementation plan a
 
 ### Module layout
 
-```
+```text
 src/
 ├── config.rs            # Existing: clap-derived DockConfig (CLI parser).
 │                        # Adds: --config <PATH>, --print-config flags.
@@ -184,7 +184,7 @@ Restart-required fields (`multi`, `wm`, `autohide`, `resident`, `hotspot-layer`,
 
 ### Cold start
 
-```
+```text
 argv → normalize_legacy_flags → Command::try_get_matches_from
                                               ↓
                               ArgMatches  +  DockConfig (CLI + clap defaults)
@@ -208,33 +208,38 @@ argv → normalize_legacy_flags → Command::try_get_matches_from
 
 ### Hot-reload happy path
 
-```
+```text
 inotify event → debounce 100ms → load_config_file(path)
                                           ↓
-                       Ok(Some(file)) → merge(saved_matches, saved_cli, file)
+                       Ok(Some(file)) → merge(saved_matches, fresh_cli, file)
                                           ↓
                                  new_dock_config
                                           ↓
-                       apply_config_change(old=&state.config, new, ctx)
+                       apply_config_change(state, new, per_monitor, rebuild)
         ┌─────────────────────────────────┼─────────────────────────────────┐
         ↓                                  ↓                                  ↓
-  RestartRequired(fields)        Applied(fields)                          NoChange
-        ↓                                  ↓                                  ↓
-  notify_user("Config             notify_user("Config                  silent
-   reloaded; `multi`,              reloaded.", body=fields)
-   `wm` change applies                       ↓
-   on next restart.")              state.borrow_mut().config = new_rc;
-        ↓                          field-by-field apply via map above
-  state.config unchanged
-  (so the "needs restart"
-   notification persists
-   across subsequent saves
-   until they restart)
+  RestartRequired                    Applicable                          NoChange
+  { restart_fields, applied }        { applied }                            ↓
+        ↓                                  ↓                              silent
+  apply hot-reloadable subset       apply hot-reloadable subset
+  build "partial new" — keeps       state.borrow_mut().config = new_rc
+  old's restart-required values            ↓
+  state.borrow_mut().config =        rebuild()
+    Rc::new(partial)                       ↓
+        ↓                            notify_user("Config reloaded.",
+  rebuild()                            body="Applied: <fields>")
+        ↓
+  notify_user("Config reloaded.",
+    body= "Applied: <hot>;
+           Restart required for:
+           <restart>")
 ```
+
+The "partial new" trick on `RestartRequired` means hot-reloadable fields apply immediately even on a mixed save, while the restart-required fields stay pinned to their pre-edit values in `state.config` so subsequent reloads still flag them as needing restart. A user reverting the restart-required edit before restart correctly produces `NoChange` on the revert (decision #13).
 
 ### Hot-reload error path
 
-```
+```text
 load_config_file → Err(ConfigError) → log + notify_user("Config error", body)
                                                   ↓
                                     state.config unchanged; dock keeps running

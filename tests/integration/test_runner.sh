@@ -165,7 +165,7 @@ echo -e "${YELLOW}=== Dock Binary Tests ===${NC}"
 
 # Use isolated D-Bus to prevent GTK from finding the real running instance
 env -i HOME="$TEST_RUNTIME" TMPDIR="$TEST_RUNTIME" XDG_RUNTIME_DIR="$TEST_RUNTIME" \
-    WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland \
+    WAYLAND_DISPLAY="$WAYLAND_DISPLAY" GDK_BACKEND=wayland \
     SWAYSOCK="$SWAYSOCK" DBUS_SESSION_BUS_ADDRESS="disabled:" \
     PATH="$PATH" \
     "$DOCK_BIN" --wm sway -m -d -i 48 --mb 10 --hide-timeout 400 &>"$TEST_RUNTIME/dock.log" &
@@ -252,7 +252,7 @@ CFGEOF
 # pipeline fires.
 env -i HOME="$TEST_RUNTIME" TMPDIR="$TEST_RUNTIME" \
     XDG_RUNTIME_DIR="$TEST_RUNTIME" XDG_CONFIG_HOME="$TEST_RUNTIME/.config" \
-    WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland \
+    WAYLAND_DISPLAY="$WAYLAND_DISPLAY" GDK_BACKEND=wayland \
     SWAYSOCK="$SWAYSOCK" DBUS_SESSION_BUS_ADDRESS="disabled:" \
     RUST_LOG=info \
     PATH="$PATH" \

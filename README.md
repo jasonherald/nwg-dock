@@ -129,7 +129,7 @@ The dock surfaces a "change applies on next restart" notification when one of th
 nwg-dock --print-config
 ```
 
-Dumps the currently-effective merged config (CLI + file + defaults) in TOML form — handy for verifying which value won and where it came from. Doesn't start the dock; safe to run alongside a running instance.
+Dumps the currently-effective merged config (CLI + file + defaults) in TOML form — handy for verifying which value won. The output shows resolved values only, not per-field provenance; if you need to know whether a field came from the CLI vs the file, omit `--config` and compare. Doesn't start the dock; safe to run alongside a running instance.
 
 **Schema:** see [`data/nwg-dock-hyprland/config.example.toml`](data/nwg-dock-hyprland/config.example.toml) for the full sectioned schema (`[behavior]`, `[layout]`, `[appearance]`, `[launcher]`, `[filters]`).
 

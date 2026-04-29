@@ -405,10 +405,16 @@ pub enum DiffResult {
     NoChange,
     /// Only hot-reloadable fields changed; safe to apply.
     Applicable { applied: Vec<&'static str> },
-    /// At least one restart-required field changed. `fields` lists every
-    /// changed field (hot-reloadable + restart-required) so the
-    /// notification can mention them all.
-    RestartRequired { fields: Vec<&'static str> },
+    /// At least one restart-required field changed. The user must
+    /// restart for those to take effect (`restart_fields` drives the
+    /// notification footnote). Any hot-reloadable fields that ALSO
+    /// changed in the same save still get applied immediately and are
+    /// listed in `applied` — that matches the spec promise that "most
+    /// fields apply immediately" even on a mixed save.
+    RestartRequired {
+        restart_fields: Vec<&'static str>,
+        applied: Vec<&'static str>,
+    },
 }
 
 /// Fields that cannot be hot-reloaded — see spec
@@ -423,12 +429,6 @@ const RESTART_REQUIRED_FIELDS: &[&str] = &[
     "layer",
     "exclusive",
 ];
-
-/// Returns true if the field name (in kebab-case CLI form) is one of
-/// the restart-required fields.
-pub fn is_restart_required(field: &str) -> bool {
-    RESTART_REQUIRED_FIELDS.contains(&field)
-}
 
 /// Computes which fields differ between `old` and `new`, classifying
 /// each as restart-required or hot-reloadable, and returns the
@@ -492,15 +492,19 @@ pub fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
         return DiffResult::NoChange;
     }
 
-    let restart_present = all_changed
+    let restart_fields: Vec<&'static str> = all_changed
         .iter()
-        .any(|f| RESTART_REQUIRED_FIELDS.contains(f));
-    if restart_present {
-        DiffResult::RestartRequired {
-            fields: all_changed,
+        .copied()
+        .filter(|f| RESTART_REQUIRED_FIELDS.contains(f))
+        .collect();
+
+    if restart_fields.is_empty() {
+        DiffResult::Applicable {
+            applied: hot_reloadable,
         }
     } else {
-        DiffResult::Applicable {
+        DiffResult::RestartRequired {
+            restart_fields,
             applied: hot_reloadable,
         }
     }
@@ -510,30 +514,81 @@ pub fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
 /// `DiffResult` describing what happened so the caller can craft an
 /// appropriate notification.
 ///
-/// On `Applicable`: updates `state.config`, calls per-field GTK update
-/// paths (set_margin, log::set_max_level, css::load_css_override), and
-/// triggers `rebuild()` afterward so changes that need a full rebuild
-/// (icon-size, alignment, ignore-classes, etc.) take effect. On
-/// `RestartRequired` or `NoChange`: state.config is left alone.
+/// Behavior by diff outcome:
+/// - `NoChange`: short-circuit, state.config untouched.
+/// - `Applicable`: full swap to `new`, run all per-field GTK updates,
+///   `rebuild()` once.
+/// - `RestartRequired`: build a "partial new" config that retains
+///   `old`'s values for the restart-required fields and takes `new`'s
+///   values for everything else. Apply the hot-reloadable subset
+///   (margins, opacity, etc.) and swap state.config to the partial.
+///   This keeps the spec's "most fields apply immediately" promise
+///   on mixed saves AND keeps decision #13's revert/re-flag behavior
+///   intact (the restart-required fields in state.config remain at
+///   their pre-edit values, so subsequent reloads still flag them).
 pub fn apply_config_change(
     new: DockConfig,
     state: &std::rc::Rc<std::cell::RefCell<crate::state::DockState>>,
     per_monitor: &std::rc::Rc<std::cell::RefCell<Vec<crate::dock_windows::MonitorDock>>>,
     rebuild: &std::rc::Rc<dyn Fn()>,
 ) -> DiffResult {
-    use gtk4_layer_shell::{Edge, LayerShell};
-
     let old = state.borrow().config.clone();
     let result = diff_config(&old, &new);
 
-    let DiffResult::Applicable { ref applied } = result else {
-        // NoChange or RestartRequired: don't touch state.config so a
-        // pending restart-required change keeps surfacing on subsequent
-        // saves until the user actually restarts.
-        return result;
+    let applied = match &result {
+        DiffResult::NoChange => return result,
+        DiffResult::Applicable { applied } => applied,
+        DiffResult::RestartRequired { applied, .. } => applied,
     };
 
-    log::info!("Hot-reloading config; changed fields: {:?}", applied);
+    log::info!(
+        "Hot-reloading config; applied fields: {:?}, restart-required: {}",
+        applied,
+        match &result {
+            DiffResult::RestartRequired { restart_fields, .. } => format!("{:?}", restart_fields),
+            _ => "none".to_string(),
+        }
+    );
+
+    apply_hot_reloadable_changes(&old, &new, per_monitor);
+
+    // Build the config that becomes state.config after this reload.
+    // For Applicable: it's `new` verbatim. For RestartRequired: it's
+    // `new` with the restart-required fields overwritten by `old`'s
+    // values, so subsequent reloads still flag those as needing
+    // restart until the process actually restarts.
+    let next_config = match &result {
+        DiffResult::RestartRequired { restart_fields, .. } => {
+            let mut partial = new;
+            preserve_restart_fields(&old, &mut partial, restart_fields);
+            partial
+        }
+        _ => new,
+    };
+
+    state.borrow_mut().config = std::rc::Rc::new(next_config);
+
+    // Single rebuild call covers icon-size, alignment, launcher-cmd,
+    // launcher-pos, nolauncher, ico, ignore-classes, ignore-workspaces,
+    // num-ws, no-fullscreen-suppress, launch-animation. position, full,
+    // and output changes that require window recreate are picked up by
+    // reconcile_monitors via the GDK monitor watcher (or the liveness
+    // tick) the next time it fires.
+    rebuild();
+
+    result
+}
+
+/// Per-field GTK updates for the hot-reloadable subset. Reads each
+/// field on both `old` and `new` and only fires the update when the
+/// value actually changed. Safe to call on every reload; idempotent
+/// when nothing in this subset changed.
+fn apply_hot_reloadable_changes(
+    old: &DockConfig,
+    new: &DockConfig,
+    per_monitor: &std::rc::Rc<std::cell::RefCell<Vec<crate::dock_windows::MonitorDock>>>,
+) {
+    use gtk4_layer_shell::{Edge, LayerShell};
 
     // Margins: per-dock set_margin.
     for dock in per_monitor.borrow().iter() {
@@ -581,27 +636,36 @@ pub fn apply_config_change(
         if new_css_path.exists() {
             // load_css() returns a CssProvider after applying the file;
             // we don't need the handle (the existing watcher still owns
-            // the original provider), but we DO want the warning if the
-            // load failed. Currently load_css doesn't return a Result —
-            // it logs internally — so the bind here is just to suppress
-            // the unused-result lint and document the intent.
+            // the original provider), and load_css logs internally on
+            // failure rather than returning a Result.
             let _provider = nwg_common::config::css::load_css(&new_css_path);
         }
     }
+}
 
-    // Swap state.config BEFORE calling rebuild, since rebuild reads
-    // from state.
-    state.borrow_mut().config = std::rc::Rc::new(new);
-
-    // Single rebuild call covers icon-size, alignment, launcher-cmd,
-    // launcher-pos, nolauncher, ico, ignore-classes, ignore-workspaces,
-    // num-ws, no-fullscreen-suppress, launch-animation. position, full,
-    // and output changes that require window recreate are picked up by
-    // reconcile_monitors via the GDK monitor watcher (or the liveness
-    // tick) the next time it fires.
-    rebuild();
-
-    result
+/// Overwrites the restart-required fields on `target` with the
+/// corresponding values from `source`, leaving every other field
+/// untouched. Used by `apply_config_change` to build the "partial new"
+/// config that keeps state.config's restart-required values pinned to
+/// the pre-edit form so subsequent reloads still flag pending changes.
+fn preserve_restart_fields(source: &DockConfig, target: &mut DockConfig, fields: &[&'static str]) {
+    for field in fields {
+        match *field {
+            "multi" => target.multi = source.multi,
+            "wm" => target.wm = source.wm,
+            "autohide" => target.autohide = source.autohide,
+            "resident" => target.resident = source.resident,
+            "hotspot-layer" => target.hotspot_layer = source.hotspot_layer,
+            "layer" => target.layer = source.layer,
+            "exclusive" => target.exclusive = source.exclusive,
+            // RESTART_REQUIRED_FIELDS is the only source of values for
+            // `fields`, so any other label is a programming error.
+            other => log::warn!(
+                "preserve_restart_fields: unknown field '{}' (programming error)",
+                other
+            ),
+        }
+    }
 }
 
 // ─── Print effective config ────────────────────────────────────────────────
@@ -747,8 +811,16 @@ where
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let watched_path = path.clone();
     let mut watcher = match notify::recommended_watcher(move |res: Result<notify::Event, _>| {
-        let Ok(event) = res else {
-            return;
+        let event = match res {
+            Ok(event) => event,
+            Err(e) => {
+                log::warn!(
+                    "Config watcher event error for {}: {}",
+                    watched_path.display(),
+                    e
+                );
+                return;
+            }
         };
         if !matches!(
             event.kind,
@@ -759,8 +831,14 @@ where
             return;
         }
         // Filter: only react to events on our specific file.
-        if event.paths.iter().any(|p| p == &watched_path) {
-            let _ = tx.send(());
+        if event.paths.iter().any(|p| p == &watched_path)
+            && let Err(e) = tx.send(())
+        {
+            log::warn!(
+                "Config watcher debounce channel send failed for {}: {} — hot-reload may be unresponsive",
+                watched_path.display(),
+                e
+            );
         }
     }) {
         Ok(w) => w,
@@ -1282,8 +1360,16 @@ mod tests {
         let a = cfg(&["test"]);
         let b = cfg(&["test", "--multi"]);
         match diff_config(&a, &b) {
-            DiffResult::RestartRequired { fields } => {
-                assert_eq!(fields, vec!["multi"]);
+            DiffResult::RestartRequired {
+                restart_fields,
+                applied,
+            } => {
+                assert_eq!(restart_fields, vec!["multi"]);
+                assert!(
+                    applied.is_empty(),
+                    "expected no applied, got: {:?}",
+                    applied
+                );
             }
             other => panic!("expected RestartRequired, got {:?}", other),
         }
@@ -1294,9 +1380,21 @@ mod tests {
         let a = cfg(&["test"]);
         let b = cfg(&["test", "--multi", "-d"]);
         match diff_config(&a, &b) {
-            DiffResult::RestartRequired { fields } => {
-                assert!(fields.contains(&"multi"), "got: {:?}", fields);
-                assert!(fields.contains(&"autohide"), "got: {:?}", fields);
+            DiffResult::RestartRequired {
+                restart_fields,
+                applied,
+            } => {
+                assert!(
+                    restart_fields.contains(&"multi"),
+                    "got: {:?}",
+                    restart_fields
+                );
+                assert!(
+                    restart_fields.contains(&"autohide"),
+                    "got: {:?}",
+                    restart_fields
+                );
+                assert!(applied.is_empty(), "got: {:?}", applied);
             }
             other => panic!("expected RestartRequired, got {:?}", other),
         }
@@ -1315,12 +1413,27 @@ mod tests {
     }
 
     #[test]
-    fn diff_mixed_restart_and_hot_reloadable_returns_restart_required() {
+    fn diff_mixed_restart_and_hot_reloadable_returns_restart_required_with_applied() {
         let a = cfg(&["test"]);
         let b = cfg(&["test", "--multi", "--icon-size", "64"]);
         match diff_config(&a, &b) {
-            DiffResult::RestartRequired { fields } => {
-                assert!(fields.contains(&"multi"), "got: {:?}", fields);
+            DiffResult::RestartRequired {
+                restart_fields,
+                applied,
+            } => {
+                // Restart-required field surfaces in the footnote.
+                assert!(
+                    restart_fields.contains(&"multi"),
+                    "got: {:?}",
+                    restart_fields
+                );
+                assert!(
+                    !restart_fields.contains(&"icon-size"),
+                    "got: {:?}",
+                    restart_fields
+                );
+                // Hot-reloadable field still applies on the same save.
+                assert!(applied.contains(&"icon-size"), "got: {:?}", applied);
             }
             other => panic!("expected RestartRequired, got {:?}", other),
         }
@@ -1379,18 +1492,53 @@ mod tests {
     }
 
     #[test]
-    fn is_restart_required_classifications() {
-        assert!(is_restart_required("multi"));
-        assert!(is_restart_required("wm"));
-        assert!(is_restart_required("autohide"));
-        assert!(is_restart_required("resident"));
-        assert!(is_restart_required("layer"));
-        assert!(is_restart_required("hotspot-layer"));
-        assert!(is_restart_required("exclusive"));
+    fn diff_restart_only_save_has_empty_applied() {
+        // Only restart-required field changed; nothing to apply alongside.
+        let a = cfg(&["test"]);
+        let b = cfg(&["test", "--exclusive"]);
+        match diff_config(&a, &b) {
+            DiffResult::RestartRequired {
+                restart_fields,
+                applied,
+            } => {
+                assert_eq!(restart_fields, vec!["exclusive"]);
+                assert!(applied.is_empty());
+            }
+            other => panic!("expected RestartRequired, got {:?}", other),
+        }
+    }
 
-        assert!(!is_restart_required("icon-size"));
-        assert!(!is_restart_required("opacity"));
-        assert!(!is_restart_required("position"));
+    #[test]
+    fn diff_mixed_save_lists_all_hot_reloadable_in_applied() {
+        // Multiple hot-reloadable fields alongside one restart-required.
+        let a = cfg(&["test"]);
+        let b = cfg(&["test", "--multi", "--icon-size", "64", "--opacity", "75"]);
+        match diff_config(&a, &b) {
+            DiffResult::RestartRequired {
+                restart_fields,
+                applied,
+            } => {
+                assert_eq!(restart_fields, vec!["multi"]);
+                assert!(applied.contains(&"icon-size"), "got: {:?}", applied);
+                assert!(applied.contains(&"opacity"), "got: {:?}", applied);
+            }
+            other => panic!("expected RestartRequired, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn preserve_restart_fields_keeps_old_values() {
+        let mut new = cfg(&["test", "--multi", "--icon-size", "64"]);
+        let old = cfg(&["test"]);
+        // Pre-condition: new has multi=true, icon-size=64
+        assert!(new.multi);
+        assert_eq!(new.icon_size, 64);
+
+        preserve_restart_fields(&old, &mut new, &["multi"]);
+
+        // multi reverts to old (false); icon-size is untouched (64).
+        assert!(!new.multi);
+        assert_eq!(new.icon_size, 64);
     }
 
     // ─── notify_user with mockable stub ────────────────────────────────────

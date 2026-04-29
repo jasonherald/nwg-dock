@@ -298,13 +298,21 @@ fn on_config_save(
             let body = format!("Applied: {}", applied.join(", "));
             config_file::notify_user("nwg-dock: config reloaded", &body);
         }
-        config_file::DiffResult::RestartRequired { fields } => {
-            let needs_restart: Vec<&str> = fields
-                .iter()
-                .filter(|f| config_file::is_restart_required(f))
-                .copied()
-                .collect();
-            let body = format!("Restart required for: {}", needs_restart.join(", "));
+        config_file::DiffResult::RestartRequired {
+            restart_fields,
+            applied,
+        } => {
+            // Mixed save: list both halves so the user sees what landed
+            // immediately AND what's still pending until restart.
+            let body = if applied.is_empty() {
+                format!("Restart required for: {}", restart_fields.join(", "))
+            } else {
+                format!(
+                    "Applied: {}; Restart required for: {}",
+                    applied.join(", "),
+                    restart_fields.join(", ")
+                )
+            };
             config_file::notify_user("nwg-dock: config reloaded", &body);
         }
     }
