@@ -24,7 +24,8 @@ pub fn normalize_legacy_flags(args: impl Iterator<Item = String>) -> Vec<String>
 }
 
 /// Dock position on screen edge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Position {
     Bottom,
     Top,
@@ -33,7 +34,8 @@ pub enum Position {
 }
 
 /// Content alignment within the dock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Alignment {
     Start,
     Center,
@@ -41,7 +43,8 @@ pub enum Alignment {
 }
 
 /// Layer-shell layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Layer {
     Overlay,
     Top,
