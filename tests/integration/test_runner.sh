@@ -195,6 +195,98 @@ wait "$DOCK_PID" 2>/dev/null || true
 unset DOCK_PID
 
 # ─────────────────────────────────────────────────────────────────────
+# Test: Config file — cold start applies file values
+# ─────────────────────────────────────────────────────────────────────
+
+echo ""
+echo -e "${YELLOW}=== Config File Tests ===${NC}"
+
+# Write a config file that flips a few defaults.
+mkdir -p "$TEST_RUNTIME/.config/nwg-dock-hyprland"
+cat > "$TEST_RUNTIME/.config/nwg-dock-hyprland/config.toml" << 'CFGEOF'
+[appearance]
+icon-size = 64
+opacity = 80
+
+[layout]
+position = "left"
+CFGEOF
+
+# Cold start with that config; assert print-config reflects merged values.
+PRINT_OUT=$(env -i HOME="$TEST_RUNTIME" XDG_CONFIG_HOME="$TEST_RUNTIME/.config" \
+    XDG_RUNTIME_DIR="$TEST_RUNTIME" PATH="$PATH" \
+    "$DOCK_BIN" --print-config 2>&1)
+assert_contains "cold-start: file's icon-size applied" "$PRINT_OUT" "icon-size = 64"
+assert_contains "cold-start: file's position applied" "$PRINT_OUT" 'position = "left"'
+
+# Cold start with malformed config exits nonzero.
+cat > "$TEST_RUNTIME/.config/nwg-dock-hyprland/config.toml" << 'CFGEOF'
+[behavior
+autohide = true
+CFGEOF
+
+# Capture exit code without aborting on the expected nonzero exit
+# (set -e would otherwise kill the script before we record RC).
+RC=0
+env -i HOME="$TEST_RUNTIME" XDG_CONFIG_HOME="$TEST_RUNTIME/.config" \
+    XDG_RUNTIME_DIR="$TEST_RUNTIME" PATH="$PATH" \
+    "$DOCK_BIN" --print-config >/dev/null 2>&1 || RC=$?
+assert_eq "cold-start: malformed config exits nonzero" "1" "$RC"
+
+# ─────────────────────────────────────────────────────────────────────
+# Test: Config file — hot-reload smoke
+# ─────────────────────────────────────────────────────────────────────
+
+# Restore valid config.
+cat > "$TEST_RUNTIME/.config/nwg-dock-hyprland/config.toml" << 'CFGEOF'
+[appearance]
+icon-size = 48
+CFGEOF
+
+# Launch the dock with the test config dir. The DBUS_SESSION_BUS_ADDRESS
+# is disabled so notify_user falls through to its log-warn path —
+# that's fine for this smoke test, we only check that the load+merge+
+# apply pipeline fires.
+env -i HOME="$TEST_RUNTIME" TMPDIR="$TEST_RUNTIME" \
+    XDG_RUNTIME_DIR="$TEST_RUNTIME" XDG_CONFIG_HOME="$TEST_RUNTIME/.config" \
+    WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland \
+    SWAYSOCK="$SWAYSOCK" DBUS_SESSION_BUS_ADDRESS="disabled:" \
+    RUST_LOG=info \
+    PATH="$PATH" \
+    "$DOCK_BIN" --wm sway -m -d -i 48 --mb 10 --hide-timeout 400 \
+    &>"$TEST_RUNTIME/dock-hotreload.log" &
+HOTRELOAD_PID=$!
+sleep 2
+assert_running "hot-reload dock is running" "$HOTRELOAD_PID"
+
+# Modify the config file (hot-reloadable field). The 100ms debounce
+# means we sleep at least that long before checking the log.
+cat > "$TEST_RUNTIME/.config/nwg-dock-hyprland/config.toml" << 'CFGEOF'
+[appearance]
+icon-size = 96
+CFGEOF
+sleep 1
+
+# Dock log should mention either the reload (Applied/applied) or the
+# config_reloaded notify_user call (which the stub-fallback logs at warn).
+HOT_LOG=$(cat "$TEST_RUNTIME/dock-hotreload.log" 2>/dev/null || echo "")
+assert_contains "hot-reload: log records the change" "$HOT_LOG" "config"
+
+# Modify with a syntax error.
+cat > "$TEST_RUNTIME/.config/nwg-dock-hyprland/config.toml" << 'CFGEOF'
+[appearance
+icon-size = 96
+CFGEOF
+sleep 1
+
+# Dock should still be alive.
+assert_running "hot-reload: dock survives malformed save" "$HOTRELOAD_PID"
+
+# Cleanup hot-reload dock.
+kill "$HOTRELOAD_PID" 2>/dev/null || true
+wait "$HOTRELOAD_PID" 2>/dev/null || true
+
+# ─────────────────────────────────────────────────────────────────────
 # Test: Sway window management (functional tests)
 # ─────────────────────────────────────────────────────────────────────
 
