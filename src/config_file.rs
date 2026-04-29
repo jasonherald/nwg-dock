@@ -389,6 +389,209 @@ fn was_set_on_cli(matches: &clap::ArgMatches, id: &str) -> bool {
     matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine)
 }
 
+// ─── Apply (diff + dispatch) ───────────────────────────────────────────────
+
+/// Outcome of comparing the live `DockConfig` against a freshly-merged
+/// candidate.
+#[derive(Debug)]
+pub enum DiffResult {
+    /// Old and new are identical (no save changed anything we track).
+    NoChange,
+    /// Only hot-reloadable fields changed; safe to apply.
+    Applicable { applied: Vec<&'static str> },
+    /// At least one restart-required field changed. `fields` lists every
+    /// changed field (hot-reloadable + restart-required) so the
+    /// notification can mention them all.
+    RestartRequired { fields: Vec<&'static str> },
+}
+
+/// Fields that cannot be hot-reloaded — see spec
+/// `docs/superpowers/specs/2026-04-28-config-file-design.md` for the
+/// rationale on each.
+const RESTART_REQUIRED_FIELDS: &[&str] = &[
+    "multi",
+    "wm",
+    "autohide",
+    "resident",
+    "hotspot-layer",
+    "layer",
+    "exclusive",
+];
+
+/// Returns true if the field name (in kebab-case CLI form) is one of
+/// the restart-required fields.
+pub fn is_restart_required(field: &str) -> bool {
+    RESTART_REQUIRED_FIELDS.contains(&field)
+}
+
+/// Computes which fields differ between `old` and `new`, classifying
+/// each as restart-required or hot-reloadable, and returns the
+/// appropriate `DiffResult`.
+pub fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
+    let mut all_changed: Vec<&'static str> = Vec::new();
+    let mut hot_reloadable: Vec<&'static str> = Vec::new();
+
+    macro_rules! cmp {
+        ($field:ident, $label:literal) => {
+            if old.$field != new.$field {
+                all_changed.push($label);
+                if !RESTART_REQUIRED_FIELDS.contains(&$label) {
+                    hot_reloadable.push($label);
+                }
+            }
+        };
+    }
+
+    // [behavior]
+    cmp!(autohide, "autohide");
+    cmp!(resident, "resident");
+    cmp!(multi, "multi");
+    cmp!(debug, "debug");
+    cmp!(wm, "wm");
+    cmp!(hide_timeout, "hide-timeout");
+    cmp!(hotspot_delay, "hotspot-delay");
+    cmp!(hotspot_layer, "hotspot-layer");
+
+    // [layout]
+    cmp!(position, "position");
+    cmp!(alignment, "alignment");
+    cmp!(full, "full");
+    cmp!(mt, "mt");
+    cmp!(mb, "mb");
+    cmp!(ml, "ml");
+    cmp!(mr, "mr");
+    cmp!(output, "output");
+    cmp!(layer, "layer");
+    cmp!(exclusive, "exclusive");
+
+    // [appearance]
+    cmp!(icon_size, "icon-size");
+    cmp!(opacity, "opacity");
+    cmp!(css_file, "css-file");
+    cmp!(launch_animation, "launch-animation");
+
+    // [launcher]
+    cmp!(launcher_cmd, "launcher-cmd");
+    cmp!(launcher_pos, "launcher-pos");
+    cmp!(nolauncher, "nolauncher");
+    cmp!(ico, "ico");
+
+    // [filters]
+    cmp!(ignore_classes, "ignore-classes");
+    cmp!(ignore_workspaces, "ignore-workspaces");
+    cmp!(num_ws, "num-ws");
+    cmp!(no_fullscreen_suppress, "no-fullscreen-suppress");
+
+    if all_changed.is_empty() {
+        return DiffResult::NoChange;
+    }
+
+    let restart_present = all_changed
+        .iter()
+        .any(|f| RESTART_REQUIRED_FIELDS.contains(f));
+    if restart_present {
+        DiffResult::RestartRequired {
+            fields: all_changed,
+        }
+    } else {
+        DiffResult::Applicable {
+            applied: hot_reloadable,
+        }
+    }
+}
+
+/// Applies a new `DockConfig` to the running dock. Returns the
+/// `DiffResult` describing what happened so the caller can craft an
+/// appropriate notification.
+///
+/// On `Applicable`: updates `state.config`, calls per-field GTK update
+/// paths (set_margin, log::set_max_level, css::load_css_override), and
+/// triggers `rebuild()` afterward so changes that need a full rebuild
+/// (icon-size, alignment, ignore-classes, etc.) take effect. On
+/// `RestartRequired` or `NoChange`: state.config is left alone.
+pub fn apply_config_change(
+    new: DockConfig,
+    state: &std::rc::Rc<std::cell::RefCell<crate::state::DockState>>,
+    per_monitor: &std::rc::Rc<std::cell::RefCell<Vec<crate::dock_windows::MonitorDock>>>,
+    rebuild: &std::rc::Rc<dyn Fn()>,
+) -> DiffResult {
+    use gtk4_layer_shell::{Edge, LayerShell};
+
+    let old = state.borrow().config.clone();
+    let result = diff_config(&old, &new);
+
+    let DiffResult::Applicable { ref applied } = result else {
+        // NoChange or RestartRequired: don't touch state.config so a
+        // pending restart-required change keeps surfacing on subsequent
+        // saves until the user actually restarts.
+        return result;
+    };
+
+    log::info!("Hot-reloading config; changed fields: {:?}", applied);
+
+    // Margins: per-dock set_margin.
+    for dock in per_monitor.borrow().iter() {
+        if old.mt != new.mt {
+            dock.win.set_margin(Edge::Top, new.mt);
+        }
+        if old.mb != new.mb {
+            dock.win.set_margin(Edge::Bottom, new.mb);
+        }
+        if old.ml != new.ml {
+            dock.win.set_margin(Edge::Left, new.ml);
+        }
+        if old.mr != new.mr {
+            dock.win.set_margin(Edge::Right, new.mr);
+        }
+    }
+
+    // Opacity: re-load the override CSS.
+    if old.opacity != new.opacity {
+        let alpha = (new.opacity.min(100) as f64) / 100.0;
+        let opacity_css = format!(
+            "window {{ background-color: rgba(54, 54, 79, {:.2}); }}",
+            alpha
+        );
+        nwg_common::config::css::load_css_override(&opacity_css);
+    }
+
+    // debug: live log level swap.
+    if old.debug != new.debug {
+        let level = if new.debug {
+            log::LevelFilter::Debug
+        } else {
+            log::LevelFilter::Info
+        };
+        log::set_max_level(level);
+    }
+
+    // CSS file path: re-load from the new path. The existing CSS watcher
+    // is bound to the original path; restarting the watcher on a new
+    // path is out of scope for this PR (changing css-file mid-session
+    // is rare). load_css applies current contents from the new path.
+    if old.css_file != new.css_file {
+        let config_dir = nwg_common::config::paths::config_dir("nwg-dock-hyprland");
+        let new_css_path = config_dir.join(&new.css_file);
+        if new_css_path.exists() {
+            let _ = nwg_common::config::css::load_css(&new_css_path);
+        }
+    }
+
+    // Swap state.config BEFORE calling rebuild, since rebuild reads
+    // from state.
+    state.borrow_mut().config = std::rc::Rc::new(new);
+
+    // Single rebuild call covers icon-size, alignment, launcher-cmd,
+    // launcher-pos, nolauncher, ico, ignore-classes, ignore-workspaces,
+    // num-ws, no-fullscreen-suppress, launch-animation. position, full,
+    // and output changes that require window recreate are picked up by
+    // reconcile_monitors via the GDK monitor watcher (or the liveness
+    // tick) the next time it fires.
+    rebuild();
+
+    result
+}
+
 // ─── Print effective config ────────────────────────────────────────────────
 
 /// Serializes a fully-resolved `DockConfig` to a TOML string with the
@@ -919,5 +1122,135 @@ mod tests {
         ] {
             assert!(s.contains(header), "expected {} in:\n{}", header, s);
         }
+    }
+
+    // ─── diff_config ───────────────────────────────────────────────────────
+
+    fn cfg(args: &[&str]) -> DockConfig {
+        let (_m, c) = parse(args);
+        c
+    }
+
+    #[test]
+    fn diff_identical_configs_returns_nochange() {
+        let a = cfg(&["test"]);
+        let b = cfg(&["test"]);
+        assert!(matches!(diff_config(&a, &b), DiffResult::NoChange));
+    }
+
+    #[test]
+    fn diff_one_restart_required_field_changed() {
+        let a = cfg(&["test"]);
+        let b = cfg(&["test", "--multi"]);
+        match diff_config(&a, &b) {
+            DiffResult::RestartRequired { fields } => {
+                assert_eq!(fields, vec!["multi"]);
+            }
+            other => panic!("expected RestartRequired, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn diff_multiple_restart_required_fields_changed() {
+        let a = cfg(&["test"]);
+        let b = cfg(&["test", "--multi", "-d"]);
+        match diff_config(&a, &b) {
+            DiffResult::RestartRequired { fields } => {
+                assert!(fields.contains(&"multi"), "got: {:?}", fields);
+                assert!(fields.contains(&"autohide"), "got: {:?}", fields);
+            }
+            other => panic!("expected RestartRequired, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn diff_only_hot_reloadable_field_changed() {
+        let a = cfg(&["test"]);
+        let b = cfg(&["test", "--icon-size", "64"]);
+        match diff_config(&a, &b) {
+            DiffResult::Applicable { applied } => {
+                assert!(applied.contains(&"icon-size"));
+            }
+            other => panic!("expected Applicable, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn diff_mixed_restart_and_hot_reloadable_returns_restart_required() {
+        let a = cfg(&["test"]);
+        let b = cfg(&["test", "--multi", "--icon-size", "64"]);
+        match diff_config(&a, &b) {
+            DiffResult::RestartRequired { fields } => {
+                assert!(fields.contains(&"multi"), "got: {:?}", fields);
+            }
+            other => panic!("expected RestartRequired, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn diff_layer_change_is_restart_required() {
+        let a = cfg(&["test"]);
+        let b = cfg(&["test", "--layer", "top"]);
+        assert!(matches!(
+            diff_config(&a, &b),
+            DiffResult::RestartRequired { .. }
+        ));
+    }
+
+    #[test]
+    fn diff_exclusive_change_is_restart_required() {
+        let a = cfg(&["test"]);
+        let b = cfg(&["test", "-x"]);
+        assert!(matches!(
+            diff_config(&a, &b),
+            DiffResult::RestartRequired { .. }
+        ));
+    }
+
+    #[test]
+    fn diff_margins_are_hot_reloadable() {
+        let a = cfg(&["test"]);
+        let b = cfg(&["test", "--mt", "5", "--mb", "10"]);
+        match diff_config(&a, &b) {
+            DiffResult::Applicable { applied } => {
+                assert!(applied.contains(&"mt"), "got: {:?}", applied);
+                assert!(applied.contains(&"mb"), "got: {:?}", applied);
+            }
+            other => panic!("expected Applicable, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn diff_revert_to_same_returns_nochange() {
+        let a = cfg(&["test", "--icon-size", "64"]);
+        let b = cfg(&["test", "--icon-size", "64"]);
+        assert!(matches!(diff_config(&a, &b), DiffResult::NoChange));
+    }
+
+    #[test]
+    fn diff_string_field_changed() {
+        let a = cfg(&["test"]);
+        let b = cfg(&["test", "--launcher-cmd", "wofi"]);
+        match diff_config(&a, &b) {
+            DiffResult::Applicable { applied } => {
+                assert!(applied.contains(&"launcher-cmd"));
+            }
+            other => panic!("expected Applicable, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn is_restart_required_classifications() {
+        assert!(is_restart_required("multi"));
+        assert!(is_restart_required("wm"));
+        assert!(is_restart_required("autohide"));
+        assert!(is_restart_required("resident"));
+        assert!(is_restart_required("layer"));
+        assert!(is_restart_required("hotspot-layer"));
+        assert!(is_restart_required("exclusive"));
+
+        assert!(!is_restart_required("icon-size"));
+        assert!(!is_restart_required("opacity"));
+        assert!(!is_restart_required("position"));
     }
 }
