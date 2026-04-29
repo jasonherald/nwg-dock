@@ -95,6 +95,73 @@ nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c 
 nwg-dock --wm sway
 ```
 
+## Configuration file
+
+In addition to CLI flags, `nwg-dock` reads a TOML config file at:
+
+```
+$XDG_CONFIG_HOME/nwg-dock-hyprland/config.toml
+```
+
+(falling back to `~/.config/nwg-dock-hyprland/config.toml` if `XDG_CONFIG_HOME` is unset). Override the path with `--config <PATH>`. The `nwg-dock-hyprland` directory name is shared with the existing `style.css` for continuity with the Go-era setup.
+
+A commented example with every field documented is installed alongside the CSS:
+
+```bash
+cp /usr/local/share/nwg-dock-hyprland/config.example.toml \
+   ~/.config/nwg-dock-hyprland/config.toml
+$EDITOR ~/.config/nwg-dock-hyprland/config.toml
+```
+
+(Adjust the source prefix if you used `make install PREFIX=$HOME/.local …` — the example file ends up in `$PREFIX/share/nwg-dock-hyprland/`.)
+
+**Precedence:** CLI flags > config file > built-in defaults. Anything you pass on the command line wins, regardless of what the file says — so `--icon-size 32` on the autostart line still takes effect even if the file specifies `icon-size = 64`.
+
+**Hot-reload:** Most fields apply immediately on save — the dock fires a desktop notification confirming the reload (or reporting a parse error). The following fields require the dock to be restarted to take effect:
+
+- `multi`, `wm`, `autohide`, `resident`, `hotspot-layer`, `layer`, `exclusive`
+
+The dock surfaces a "change applies on next restart" notification when one of those is edited.
+
+**Inspect what's loaded:**
+
+```bash
+nwg-dock --print-config
+```
+
+Dumps the currently-effective merged config (CLI + file + defaults) in TOML form — handy for verifying which value won and where it came from. Doesn't start the dock; safe to run alongside a running instance.
+
+**Schema:** see [`data/nwg-dock-hyprland/config.example.toml`](data/nwg-dock-hyprland/config.example.toml) for the full sectioned schema (`[behavior]`, `[layout]`, `[appearance]`, `[launcher]`, `[filters]`).
+
+**Example: shrink the autostart line.** A typical autostart entry like:
+
+```ini
+exec-once = nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c "nwg-drawer --opacity 88 --pb-auto"
+```
+
+becomes:
+
+```ini
+exec-once = nwg-dock -d -c "nwg-drawer --opacity 88 --pb-auto"
+```
+
+with the persistable bits moved into `~/.config/nwg-dock-hyprland/config.toml`:
+
+```toml
+[appearance]
+icon-size = 48
+opacity = 75
+launch-animation = true
+
+[layout]
+mb = 10
+
+[behavior]
+hide-timeout = 400
+```
+
+The `-d` (autohide) and `-c` (launcher command) stay on the CLI because launcher is invocation-specific and autohide is one of the restart-required fields — you might want to swap autohide on/off with a different `exec-once` line for testing.
+
 ## Compositor setup
 
 ```bash
