@@ -44,7 +44,7 @@ pub fn setup_autohide(
     app: &gtk4::Application,
 ) -> Option<Rc<HotspotContext>> {
     if compositor.supports_cursor_position() {
-        cursor_poller::start_cursor_poller(per_monitor, config, state, compositor);
+        cursor_poller::start_cursor_poller(per_monitor, state, compositor);
         None
     } else {
         Some(hotspot_windows::start_hotspot_windows(

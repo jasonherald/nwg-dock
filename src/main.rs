@@ -112,6 +112,7 @@ fn main() {
         .build();
 
     let config = Rc::new(config);
+    let matches = Rc::new(matches);
     let data_home = Rc::new(data_home);
     let pinned_file = Rc::new(pinned_file);
     let css_path = Rc::new(css_path);
@@ -121,6 +122,7 @@ fn main() {
             app,
             &css_path,
             &config,
+            &matches,
             &app_dirs,
             &compositor,
             &pinned_file,
@@ -138,6 +140,7 @@ fn activate_dock(
     app: &gtk4::Application,
     css_path: &Rc<std::path::PathBuf>,
     config: &Rc<DockConfig>,
+    matches: &Rc<clap::ArgMatches>,
     app_dirs: &[std::path::PathBuf],
     compositor: &Rc<dyn nwg_common::compositor::Compositor>,
     pinned_file: &Rc<std::path::PathBuf>,
@@ -150,6 +153,8 @@ fn activate_dock(
     let state = Rc::new(RefCell::new(DockState::new(
         app_dirs.to_vec(),
         Rc::clone(compositor),
+        Rc::clone(config),
+        (**matches).clone(),
     )));
     state.borrow_mut().pinned = pinning::load_pinned(pinned_file);
     state.borrow_mut().locked = ui::dock_menu::load_lock_state();
@@ -163,14 +168,8 @@ fn activate_dock(
     let docks = dock_windows::create_dock_windows(app, &monitors, config);
     let per_monitor = Rc::new(RefCell::new(docks));
 
-    let rebuild = rebuild::create_rebuild_fn(
-        &per_monitor,
-        config,
-        &state,
-        data_home,
-        pinned_file,
-        compositor,
-    );
+    let rebuild =
+        rebuild::create_rebuild_fn(&per_monitor, &state, data_home, pinned_file, compositor);
     rebuild();
 
     for dock in per_monitor.borrow().iter() {
@@ -193,7 +192,7 @@ fn activate_dock(
     let reconcile_ctx = Rc::new(listeners::ReconcileContext {
         app: app.clone(),
         per_monitor: Rc::clone(&per_monitor),
-        config: Rc::clone(config),
+        state: Rc::clone(&state),
         rebuild_fn: Rc::clone(&rebuild),
         hotspot_ctx,
     });
