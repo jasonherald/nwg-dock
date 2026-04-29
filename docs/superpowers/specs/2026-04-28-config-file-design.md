@@ -144,7 +144,17 @@ enum ConfigError {
     /// Bad TOML syntax (unbalanced quotes, invalid table header, etc.)
     ParseError(toml::de::Error),
     /// Wrong type or invalid enum value for a known key.
-    InvalidValue { section: &'static str, key: String, value: String, expected: String },
+    /// `error_debug` holds the toml deserialize error's `{:?}` form (for logs);
+    /// `error_message` holds the `{}` display form (which embeds the expected
+    /// type and offending value in human-readable prose). The toml crate
+    /// doesn't expose the raw user-supplied literal as a separate field, so
+    /// we keep both surface forms rather than inventing one.
+    InvalidValue {
+        section: &'static str,
+        key: String,
+        error_debug: String,
+        error_message: String,
+    },
     /// Couldn't open/read the file (permissions, EIO, etc.)
     IoError(std::io::Error),
 }
