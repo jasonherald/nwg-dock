@@ -12,7 +12,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > preserved in the monorepo's git log; this file only documents changes from
 > v0.3.0 onward.
 
-## [0.3.0] — Unreleased
+## [0.3.1] — 2026-04-28
+
+### Added
+
+- TOML config file support (#33). Default location
+  `$XDG_CONFIG_HOME/nwg-dock-hyprland/config.toml`; override with
+  `--config <PATH>`. Sectioned schema (`[behavior]`, `[layout]`,
+  `[appearance]`, `[launcher]`, `[filters]`) mirrors the existing CLI
+  flags. Precedence is CLI explicit > file > built-in defaults. CLI
+  flags continue to work unchanged.
+- `--print-config` flag: dump the currently-effective merged config to
+  stdout and exit. Handy for verifying which value won. Safe to run
+  alongside a running instance.
+- Commented example file shipped to
+  `$DATA/nwg-dock-hyprland/config.example.toml` documenting every
+  field.
+
+### Changed
+
+- Hot-reload of config-file changes: most fields apply on save without
+  a restart, with a desktop notification confirming the reload or
+  reporting a parse error. Seven fields require a restart and surface
+  a notification footnote when edited: `multi`, `wm`, `autohide`,
+  `resident`, `hotspot-layer`, `layer`, `exclusive`. Parse errors
+  during hot-reload notify the user and leave the dock running on the
+  previous config; cold-start parse errors exit 1.
+
+### Fixed
+
+- Reconciliation now uses `destroy()` instead of `close()` to tear down
+  zombie and orphaned dock windows. The dock vetoes every close-request
+  to defeat compositor kill shortcuts (Hyprland `killactive`, `Super+Q`),
+  which made `close()` a no-op for our own teardown paths — old windows
+  survived on top of the freshly-rebuilt ones, producing a visible second
+  dock after `swaylock` unlock and other surface-destruction events
+  (#39).
+
+## [0.3.0] — 2026-04-20
 
 First standalone release. Extracts the dock binary from
 [`mac-doc-hyprland`](https://github.com/jasonherald/mac-doc-hyprland) as its
@@ -33,38 +70,3 @@ own repo + crates.io crate.
 
 - crates.io metadata (`description`, `readme`, `keywords`, `categories`,
   `repository`) wired up.
-
-### Fixed
-
-- Reconciliation now uses `destroy()` instead of `close()` to tear down
-  zombie and orphaned dock windows. The dock vetoes every close-request
-  to defeat compositor kill shortcuts (Hyprland `killactive`, `Super+Q`),
-  which made `close()` a no-op for our own teardown paths — old windows
-  survived on top of the freshly-rebuilt ones, producing a visible second
-  dock after `swaylock` unlock and other surface-destruction events
-  (#39).
-
-### Added (continued)
-
-- TOML config file support (#33). Default location
-  `$XDG_CONFIG_HOME/nwg-dock-hyprland/config.toml`; override with
-  `--config <PATH>`. Sectioned schema (`[behavior]`, `[layout]`,
-  `[appearance]`, `[launcher]`, `[filters]`) mirrors the existing CLI
-  flags. Precedence is CLI explicit > file > built-in defaults. CLI
-  flags continue to work unchanged.
-- `--print-config` flag: dump the currently-effective merged config to
-  stdout and exit. Handy for verifying which value won and where it
-  came from. Safe to run alongside a running instance.
-- Commented example file shipped to
-  `$DATA/nwg-dock-hyprland/config.example.toml` documenting every
-  field.
-
-### Changed (continued)
-
-- Hot-reload of config-file changes: most fields apply on save without
-  a restart, with a desktop notification confirming the reload or
-  reporting a parse error. Seven fields require a restart and surface
-  a notification footnote when edited: `multi`, `wm`, `autohide`,
-  `resident`, `hotspot-layer`, `layer`, `exclusive`. Parse errors
-  during hot-reload notify the user and leave the dock running on the
-  previous config; cold-start parse errors exit 1.
