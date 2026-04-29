@@ -249,7 +249,7 @@ load_config_file → Err(ConfigError) → log + notify_user("Config error", body
 
 ## Error handling
 
-Six failure modes, each with a defined outcome:
+Six core failure modes plus two file-state special cases, each with a defined outcome:
 
 | # | Failure | Cold start | Hot reload |
 |---|---|---|---|

@@ -291,7 +291,13 @@ icon-size = 96
 CFGEOF
 sleep 1
 
-# Dock should still be alive.
+# Re-read the log AFTER the bad save and assert the failure was
+# actually reported. Without this, the watcher silently ignoring the
+# bad TOML would still pass the liveness check below.
+HOT_LOG=$(cat "$TEST_RUNTIME/dock-hotreload.log" 2>/dev/null || echo "")
+assert_contains "hot-reload: malformed save is reported" "$HOT_LOG" "Config reload failed"
+
+# Dock should still be alive after the malformed save.
 assert_running "hot-reload: dock survives malformed save" "$HOTRELOAD_PID"
 
 # Cleanup hot-reload dock.
