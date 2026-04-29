@@ -11,7 +11,7 @@ mod ui;
 
 use crate::config::DockConfig;
 use crate::state::DockState;
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use gtk4::prelude::*;
 use nwg_common::config::paths;
 use nwg_common::desktop::dirs::get_app_dirs;
@@ -25,14 +25,53 @@ use std::rc::Rc;
 
 fn main() {
     nwg_common::process::handle_dump_args();
-    let mut config = DockConfig::parse_from(config::normalize_legacy_flags(std::env::args()));
+    let raw_args = config::normalize_legacy_flags(std::env::args());
 
-    if config.debug {
+    let cmd = DockConfig::command();
+    let matches = match cmd.try_get_matches_from(raw_args) {
+        Ok(m) => m,
+        Err(e) => e.exit(),
+    };
+    let cli_config = match DockConfig::from_arg_matches(&matches) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            std::process::exit(2);
+        }
+    };
+
+    if cli_config.debug {
         env_logger::Builder::from_default_env()
             .filter_level(log::LevelFilter::Debug)
             .init();
     } else {
         env_logger::init();
+    }
+
+    // Resolve config file path (CLI override or XDG default), load, merge.
+    let config_path = cli_config
+        .config
+        .clone()
+        .unwrap_or_else(config_file::default_config_path);
+    let file = match config_file::load_config_file(&config_path) {
+        Ok(f) => f,
+        Err(e) => {
+            log::error!("Config file error at {}: {}", config_path.display(), e);
+            // Best-effort notify; cold start has no prior state to keep,
+            // so we still exit on error.
+            config_file::notify_user(
+                "nwg-dock: config error",
+                &format!("{}: {}", config_path.display(), e),
+            );
+            std::process::exit(1);
+        }
+    };
+    let mut config = config_file::merge(&matches, cli_config, file);
+
+    // --print-config: dump and exit before any GTK / compositor side effects.
+    if config.print_config {
+        print!("{}", config_file::print_effective_config(&config));
+        std::process::exit(0);
     }
 
     if config.autohide && config.resident {

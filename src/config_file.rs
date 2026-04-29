@@ -446,6 +446,16 @@ pub fn print_effective_config(cfg: &DockConfig) -> String {
     })
 }
 
+// ─── Notifications (full impl in Task 12 of plan) ──────────────────────────
+
+/// Sends a desktop notification. Best-effort — failures are logged and
+/// never block the dock. Replaced by a real notify-rust implementation in
+/// the next planned task; for now logs at info level so cold-start error
+/// paths can call it without panic.
+pub fn notify_user(summary: &str, body: &str) {
+    log::info!("notify_user (stub): {} — {}", summary, body);
+}
+
 // ─── Default config path ───────────────────────────────────────────────────
 
 /// Returns the default config file path:
