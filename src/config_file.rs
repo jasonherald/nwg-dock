@@ -115,12 +115,18 @@ impl StringOrList {
 pub enum ConfigError {
     /// Bad TOML syntax: unbalanced quotes, invalid table header, etc.
     ParseError(toml::de::Error),
-    /// A known key has the wrong type or an invalid enum value.
+    /// A known key has the wrong type or an invalid enum value. The
+    /// fields hold the toml deserialize error's two surface forms: the
+    /// detailed `{:?}` debug for logs, and the human-readable `{}`
+    /// display message which embeds the expected type and the offending
+    /// value. The toml crate doesn't expose the raw user-supplied
+    /// literal as a separate field, so we keep both forms rather than
+    /// inventing one.
     InvalidValue {
         section: &'static str,
         key: String,
-        value: String,
-        expected: String,
+        error_debug: String,
+        error_message: String,
     },
     /// Couldn't read the file (permissions, disk error, etc.).
     IoError(std::io::Error),
@@ -133,12 +139,12 @@ impl std::fmt::Display for ConfigError {
             ConfigError::InvalidValue {
                 section,
                 key,
-                value,
-                expected,
+                error_debug,
+                error_message,
             } => write!(
                 f,
                 "invalid value for {}.{}: '{}' — expected {}",
-                section, key, value, expected
+                section, key, error_debug, error_message
             ),
             ConfigError::IoError(e) => write!(f, "{}", e),
         }
@@ -204,8 +210,8 @@ pub fn load_config_file(path: &std::path::Path) -> Result<Option<RawConfigFile>,
             ConfigError::InvalidValue {
                 section,
                 key,
-                value: format!("{:?}", inner),
-                expected: format!("{}", inner),
+                error_debug: format!("{:?}", inner),
+                error_message: format!("{}", inner),
             }
         })
         .map(Some)
@@ -545,13 +551,13 @@ pub fn apply_config_change(
         }
     }
 
-    // Opacity: re-load the override CSS.
+    // Opacity: re-load the override CSS using the canonical default
+    // background RGB. Kept in sync with ui::css::load_dock_css.
     if old.opacity != new.opacity {
         let alpha = (new.opacity.min(100) as f64) / 100.0;
-        let opacity_css = format!(
-            "window {{ background-color: rgba(54, 54, 79, {:.2}); }}",
-            alpha
-        );
+        let (r, g, b) = crate::ui::constants::DEFAULT_BG_RGB;
+        let opacity_css =
+            format!("window {{ background-color: rgba({r}, {g}, {b}, {alpha:.2}); }}");
         nwg_common::config::css::load_css_override(&opacity_css);
     }
 
@@ -573,7 +579,13 @@ pub fn apply_config_change(
         let config_dir = nwg_common::config::paths::config_dir("nwg-dock-hyprland");
         let new_css_path = config_dir.join(&new.css_file);
         if new_css_path.exists() {
-            let _ = nwg_common::config::css::load_css(&new_css_path);
+            // load_css() returns a CssProvider after applying the file;
+            // we don't need the handle (the existing watcher still owns
+            // the original provider), but we DO want the warning if the
+            // load failed. Currently load_css doesn't return a Result —
+            // it logs internally — so the bind here is just to suppress
+            // the unused-result lint and document the intent.
+            let _provider = nwg_common::config::css::load_css(&new_css_path);
         }
     }
 
@@ -764,11 +776,15 @@ where
     }
 
     // Keep the watcher alive on the GLib main loop; debounce reload
-    // events. The Rc<RefCell<_>> wrapper holds the Watcher inside the
-    // closure so it lives for the lifetime of the GLib timer.
-    let watcher_holder = std::rc::Rc::new(std::cell::RefCell::new(Some(watcher)));
+    // events. `move ||` captures the watcher (and the Rc<on_change>)
+    // by value so they live for the timer's lifetime — no extra clone
+    // needed inside the closure.
     let on_change = std::rc::Rc::new(on_change);
     gtk4::glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        // The closure carries `watcher` by move; touch it explicitly to
+        // make the keep-alive intent clear to readers.
+        let _ = &watcher;
+
         // Drain any queued events so we only fire on_change once per
         // debounce window.
         let mut changed = false;
@@ -778,8 +794,6 @@ where
         if changed {
             (on_change)();
         }
-        // Keep the watcher alive through the timer's lifetime.
-        let _keep = watcher_holder.clone();
         gtk4::glib::ControlFlow::Continue
     });
 }
@@ -986,8 +1000,8 @@ mod tests {
         let ce = ConfigError::InvalidValue {
             section: "layout",
             key: "position".into(),
-            value: "side".into(),
-            expected: "one of: top, bottom, left, right".into(),
+            error_debug: "side".into(),
+            error_message: "one of: top, bottom, left, right".into(),
         };
         let display = format!("{}", ce);
         assert!(display.contains("layout.position"), "got: {}", display);

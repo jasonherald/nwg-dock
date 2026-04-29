@@ -1,6 +1,12 @@
 /// Edge detection threshold in pixels from the screen edge (autohide trigger zone).
 pub const EDGE_THRESHOLD: i32 = 2;
 
+/// Default dock background RGB (dark purple-gray). Embedded in the GTK4
+/// compat CSS at startup and re-emitted whenever opacity changes (initial
+/// load and hot-reload). User CSS files can override the full
+/// `background-color` rule; this constant is just the built-in default.
+pub const DEFAULT_BG_RGB: (u8, u8, u8) = (54, 54, 79);
+
 /// Thickness of the Sway hotspot trigger window in pixels.
 pub const HOTSPOT_THICKNESS: i32 = 4;
 

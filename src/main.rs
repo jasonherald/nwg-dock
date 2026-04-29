@@ -40,13 +40,19 @@ fn main() {
         }
     };
 
-    if cli_config.debug {
-        env_logger::Builder::from_default_env()
-            .filter_level(log::LevelFilter::Debug)
-            .init();
+    // Initialize the logger at Debug filter so debug-level events from
+    // any source can flow once we finish merging. The CLI-or-file
+    // `debug` decision is made via log::set_max_level so it can be
+    // updated AFTER config-file merge — the file may set debug=true
+    // even when the CLI didn't.
+    env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
+    log::set_max_level(if cli_config.debug {
+        log::LevelFilter::Debug
     } else {
-        env_logger::init();
-    }
+        log::LevelFilter::Info
+    });
 
     // Resolve config file path (CLI override or XDG default), load, merge.
     let config_path = cli_config
@@ -67,6 +73,15 @@ fn main() {
         }
     };
     let mut config = config_file::merge(&matches, cli_config, file);
+
+    // Now that the file has been merged in, apply the final debug
+    // setting. If the file flips debug on (and the CLI didn't), this
+    // is where it takes effect.
+    log::set_max_level(if config.debug {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    });
 
     // --print-config: dump and exit before any GTK / compositor side effects.
     if config.print_config {
@@ -111,83 +126,94 @@ fn main() {
         .application_id("com.mac-dock.hyprland")
         .build();
 
-    let config = Rc::new(config);
-    let matches = Rc::new(matches);
-    let data_home = Rc::new(data_home);
-    let pinned_file = Rc::new(pinned_file);
-    let css_path = Rc::new(css_path);
+    let bootstrap = Rc::new(ActivateParams {
+        css_path: Rc::new(css_path),
+        config: Rc::new(config),
+        matches: Rc::new(matches),
+        app_dirs,
+        compositor,
+        pinned_file: Rc::new(pinned_file),
+        data_home: Rc::new(data_home),
+        sig_rx,
+    });
 
     app.connect_activate(move |app| {
-        activate_dock(
-            app,
-            &css_path,
-            &config,
-            &matches,
-            &app_dirs,
-            &compositor,
-            &pinned_file,
-            &data_home,
-            &sig_rx,
-        );
+        activate_dock(app, &bootstrap);
     });
 
     app.run_with_args::<String>(&[]);
 }
 
+/// Bundles everything `activate_dock` needs from `main()` so the
+/// signature stays at one parameter (per CLAUDE.md "never pass 7+
+/// individual refs"). Built once in `main`, cloned on each
+/// `connect_activate` callback. Distinct from `DockContext` (which
+/// covers the rebuild path's narrower needs).
+struct ActivateParams {
+    css_path: Rc<std::path::PathBuf>,
+    config: Rc<DockConfig>,
+    matches: Rc<clap::ArgMatches>,
+    app_dirs: Vec<std::path::PathBuf>,
+    compositor: Rc<dyn nwg_common::compositor::Compositor>,
+    pinned_file: Rc<std::path::PathBuf>,
+    data_home: Rc<std::path::PathBuf>,
+    sig_rx: Rc<std::sync::mpsc::Receiver<signals::WindowCommand>>,
+}
+
 /// Sets up the dock UI: state, monitors, windows, rebuild function, and listeners.
-#[allow(clippy::too_many_arguments)]
-fn activate_dock(
-    app: &gtk4::Application,
-    css_path: &Rc<std::path::PathBuf>,
-    config: &Rc<DockConfig>,
-    matches: &Rc<clap::ArgMatches>,
-    app_dirs: &[std::path::PathBuf],
-    compositor: &Rc<dyn nwg_common::compositor::Compositor>,
-    pinned_file: &Rc<std::path::PathBuf>,
-    data_home: &Rc<std::path::PathBuf>,
-    sig_rx: &Rc<std::sync::mpsc::Receiver<signals::WindowCommand>>,
-) {
-    ui::css::load_dock_css(css_path, config.opacity);
+fn activate_dock(app: &gtk4::Application, params: &ActivateParams) {
+    ui::css::load_dock_css(&params.css_path, params.config.opacity);
     let _hold = app.hold();
 
     let state = Rc::new(RefCell::new(DockState::new(
-        app_dirs.to_vec(),
-        Rc::clone(compositor),
-        Rc::clone(config),
-        (**matches).clone(),
+        params.app_dirs.clone(),
+        Rc::clone(&params.compositor),
+        Rc::clone(&params.config),
+        (*params.matches).clone(),
     )));
-    state.borrow_mut().pinned = pinning::load_pinned(pinned_file);
+    state.borrow_mut().pinned = pinning::load_pinned(&params.pinned_file);
     state.borrow_mut().locked = ui::dock_menu::load_lock_state();
-    state.borrow_mut().wm_class_to_desktop_id = build_wm_class_map(app_dirs);
+    state.borrow_mut().wm_class_to_desktop_id = build_wm_class_map(&params.app_dirs);
     if let Err(e) = state.borrow_mut().refresh_clients() {
         log::error!("Couldn't list clients: {}", e);
     }
 
-    let monitors = monitor::resolve_monitors(config);
+    let monitors = monitor::resolve_monitors(&params.config);
 
-    let docks = dock_windows::create_dock_windows(app, &monitors, config);
+    let docks = dock_windows::create_dock_windows(app, &monitors, &params.config);
     let per_monitor = Rc::new(RefCell::new(docks));
 
-    let rebuild =
-        rebuild::create_rebuild_fn(&per_monitor, &state, data_home, pinned_file, compositor);
+    let rebuild = rebuild::create_rebuild_fn(
+        &per_monitor,
+        &state,
+        &params.data_home,
+        &params.pinned_file,
+        &params.compositor,
+    );
     rebuild();
 
     for dock in per_monitor.borrow().iter() {
         dock.win.present();
     }
 
-    let hotspot_ctx = if config.autohide {
-        listeners::setup_autohide(&per_monitor, config, &state, compositor, app)
+    let hotspot_ctx = if params.config.autohide {
+        listeners::setup_autohide(
+            &per_monitor,
+            &params.config,
+            &state,
+            &params.compositor,
+            app,
+        )
     } else {
         None
     };
     events::start_event_listener(
         Rc::clone(&state),
         Rc::clone(&rebuild),
-        Rc::clone(compositor),
+        Rc::clone(&params.compositor),
     );
-    listeners::setup_pin_watcher(pinned_file, &rebuild);
-    listeners::setup_signal_poller(app, &per_monitor, sig_rx);
+    listeners::setup_pin_watcher(&params.pinned_file, &rebuild);
+    listeners::setup_signal_poller(app, &per_monitor, &params.sig_rx);
 
     let reconcile_ctx = Rc::new(listeners::ReconcileContext {
         app: app.clone(),
@@ -201,7 +227,8 @@ fn activate_dock(
 
     // Hot-reload pipeline: watch the config file, on save re-load,
     // re-merge, and apply or notify per the diff result.
-    let config_path = config
+    let config_path = params
+        .config
         .config
         .clone()
         .unwrap_or_else(config_file::default_config_path);
@@ -242,9 +269,23 @@ fn on_config_save(
         }
     };
 
-    // Re-run merge with the original ArgMatches so CLI provenance still wins.
-    let cli_snapshot = state.borrow().config.as_ref().clone();
+    // Re-run merge with the original ArgMatches AND a fresh CLI-only
+    // baseline. Cloning state.config would carry the previous file
+    // overlay forward — if a user removes `icon-size` from the file,
+    // we'd retain the old file value instead of falling back to CLI
+    // defaults. Rebuilding cli_snapshot from the stored matches is the
+    // clean baseline.
     let matches = state.borrow().args_matches.clone();
+    let cli_snapshot = match DockConfig::from_arg_matches(&matches) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!(
+                "Failed to rebuild CLI baseline from stored ArgMatches: {}",
+                e
+            );
+            return;
+        }
+    };
     let new = config_file::merge(&matches, cli_snapshot, raw);
 
     let result = config_file::apply_config_change(new, state, per_monitor, rebuild);

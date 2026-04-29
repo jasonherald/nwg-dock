@@ -21,7 +21,7 @@ Add a TOML config file at `$XDG_CONFIG_HOME/nwg-dock-hyprland/config.toml` that 
 - Environment variable overlay.
 - Multiple format support (JSON, YAML, INI). TOML only.
 - Sharing the loader with sibling crates (drawer, notifications). Dock-only first; lift to `nwg-common` later if/when a sibling needs it.
-- Hot-reloading every field. Six fields are explicitly restart-required (see *Restart-required fields* below).
+- Hot-reloading every field. Seven fields are explicitly restart-required (see *Restart-required fields* below).
 
 ## Decisions
 
@@ -160,7 +160,7 @@ enum ConfigError {
 | `merge` | `fn(matches: &ArgMatches, cli: DockConfig, file: Option<RawConfigFile>) -> DockConfig` | For each field, `matches.value_source(field) == ValueSource::CommandLine` ⇒ keep CLI; else `file.section.field.is_some()` ⇒ use file; else keep CLI's default. |
 | `print_effective_config` | `fn(&DockConfig) -> String` | Round-trips DockConfig → `RawConfigFile` → `toml::to_string_pretty`. Outputs sectioned form with all fields present. |
 | `watch_config_file` | `fn(path: PathBuf, on_reload: impl Fn() + 'static)` | Mirrors `nwg_common::config::css::watch_css`: notify-rs on parent dir, GLib debounced timer (100ms), callback on changes. |
-| `apply_config_change` | `fn(old: &DockConfig, new: DockConfig, ctx: &DockContext) -> ApplyResult` | Diffs old vs new. Returns `ApplyResult::RestartRequired(Vec<&'static str>)` if any of the six restart-required fields differ; else applies field-by-field and returns `Applied(Vec<&'static str>)` or `NoChange`. |
+| `apply_config_change` | `fn(old: &DockConfig, new: DockConfig, ctx: &DockContext) -> ApplyResult` | Diffs old vs new. Returns `ApplyResult::RestartRequired(Vec<&'static str>)` if any of the seven restart-required fields differ; else applies field-by-field and returns `Applied(Vec<&'static str>)` or `NoChange`. |
 | `notify_user` | Function pointer: `static NOTIFIER: AtomicPtr<NotifyFn> = …;` indirected so tests can install a stub. Default points at a `notify-rust` wrapper. | Best-effort; failure to deliver logs a warning. |
 
 ### Apply-path field map
@@ -171,12 +171,10 @@ The diff in `apply_config_change` routes each changed hot-reloadable field to th
 |---|---|
 | `position`, `alignment`, `full`, `output` | `reconcile_monitors` (window recreate) |
 | `mt`, `mb`, `ml`, `mr` | `win.set_margin(...)` per dock |
-| `icon-size`, `launcher-pos`, `nolauncher`, `ico` | `rebuild()` |
+| `icon-size`, `launcher-pos`, `nolauncher`, `ico`, `launcher-cmd`, `launch-animation` | `rebuild()` covers them on the next iteration |
 | `opacity` | `css::load_css_override` |
-| `css-file` | Re-resolve path, re-load, restart CSS watcher |
-| `launch-animation` | Toggle `dock-launching` class application; rebuild for clean state |
-| `launcher-cmd` | String swap (read at click time; no rebuild needed) |
-| `hide-timeout`, `hotspot-delay` | Update the cached value the cursor poller reads |
+| `css-file` | Re-resolve path and re-load CSS from the new path. Restarting the CSS watcher itself is out of scope for v1 (changing `css-file` mid-session is rare); a follow-up can re-watch the new path. |
+| `hide-timeout`, `hotspot-delay` | Read live by the cursor poller / hotspot timer at every tick — the `state.config` swap below is enough; no separate update. |
 | `ignore-classes`, `ignore-workspaces`, `no-fullscreen-suppress`, `num-ws` | State refresh + `rebuild()` |
 | `debug` | `log::set_max_level(...)` |
 

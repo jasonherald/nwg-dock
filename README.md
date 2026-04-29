@@ -99,7 +99,7 @@ nwg-dock --wm sway
 
 In addition to CLI flags, `nwg-dock` reads a TOML config file at:
 
-```
+```text
 $XDG_CONFIG_HOME/nwg-dock-hyprland/config.toml
 ```
 

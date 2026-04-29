@@ -68,5 +68,3 @@ own repo + crates.io crate.
   `resident`, `hotspot-layer`, `layer`, `exclusive`. Parse errors
   during hot-reload notify the user and leave the dock running on the
   previous config; cold-start parse errors exit 1.
-- Bumped `nwg-common` dependency to 0.3.1 for `WmOverride` serde
-  derives.

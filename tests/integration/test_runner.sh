@@ -243,17 +243,20 @@ cat > "$TEST_RUNTIME/.config/nwg-dock-hyprland/config.toml" << 'CFGEOF'
 icon-size = 48
 CFGEOF
 
-# Launch the dock with the test config dir. The DBUS_SESSION_BUS_ADDRESS
-# is disabled so notify_user falls through to its log-warn path —
-# that's fine for this smoke test, we only check that the load+merge+
-# apply pipeline fires.
+# Launch the dock with the test config dir. Crucially, DON'T pass
+# `-i 48` here — we want the file's icon-size value to win on the
+# reload, which only happens if value_source for icon_size is
+# DefaultValue (not CommandLine). The DBUS_SESSION_BUS_ADDRESS is
+# disabled so notify_user falls through to its log-warn path — that's
+# fine for this smoke test, we only check that the load+merge+apply
+# pipeline fires.
 env -i HOME="$TEST_RUNTIME" TMPDIR="$TEST_RUNTIME" \
     XDG_RUNTIME_DIR="$TEST_RUNTIME" XDG_CONFIG_HOME="$TEST_RUNTIME/.config" \
     WAYLAND_DISPLAY=wayland-1 GDK_BACKEND=wayland \
     SWAYSOCK="$SWAYSOCK" DBUS_SESSION_BUS_ADDRESS="disabled:" \
     RUST_LOG=info \
     PATH="$PATH" \
-    "$DOCK_BIN" --wm sway -m -d -i 48 --mb 10 --hide-timeout 400 \
+    "$DOCK_BIN" --wm sway -m -d --mb 10 --hide-timeout 400 \
     &>"$TEST_RUNTIME/dock-hotreload.log" &
 HOTRELOAD_PID=$!
 sleep 2
@@ -267,10 +270,14 @@ icon-size = 96
 CFGEOF
 sleep 1
 
-# Dock log should mention either the reload (Applied/applied) or the
-# config_reloaded notify_user call (which the stub-fallback logs at warn).
+# Dock log should record an "Applied:" line — apply_config_change logs
+# "Hot-reloading config; changed fields: [...]" then returns
+# Applicable, which on_config_save formats into a notification body
+# starting with "Applied:". The notification falls through to log at
+# warn level since DBUS is disabled, so the body still appears in the
+# log.
 HOT_LOG=$(cat "$TEST_RUNTIME/dock-hotreload.log" 2>/dev/null || echo "")
-assert_contains "hot-reload: log records the change" "$HOT_LOG" "config"
+assert_contains "hot-reload: applied icon-size change" "$HOT_LOG" "Applied:"
 
 # Modify with a syntax error.
 cat > "$TEST_RUNTIME/.config/nwg-dock-hyprland/config.toml" << 'CFGEOF'
