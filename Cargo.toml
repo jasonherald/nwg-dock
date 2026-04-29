@@ -39,5 +39,15 @@ env_logger = "0.11"
 # Unix signals and process management
 nix = { version = "0.31", features = ["signal", "process", "fs"] }
 
-# File watching (pin-file inotify, CSS hot-reload)
+# File watching (pin-file inotify, CSS hot-reload, config-file hot-reload)
 notify = "8"
+
+# Config file (TOML parser + field-name extraction on type errors)
+toml = "0.8"
+serde_path_to_error = "0.1"
+
+# Desktop notifications (D-Bus libnotify wrapper) for config-file lint
+notify-rust = "4"
+
+[dev-dependencies]
+tempfile = "3"
