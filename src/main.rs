@@ -198,6 +198,75 @@ fn activate_dock(
     });
     listeners::setup_monitor_watcher(Rc::clone(&reconcile_ctx));
     listeners::setup_liveness_tick(reconcile_ctx);
+
+    // Hot-reload pipeline: watch the config file, on save re-load,
+    // re-merge, and apply or notify per the diff result.
+    let config_path = config
+        .config
+        .clone()
+        .unwrap_or_else(config_file::default_config_path);
+    {
+        let state_for_watcher = Rc::clone(&state);
+        let per_monitor_for_watcher = Rc::clone(&per_monitor);
+        let rebuild_for_watcher = Rc::clone(&rebuild);
+        let path_for_watcher = config_path.clone();
+
+        config_file::watch_config_file(config_path, move || {
+            on_config_save(
+                &path_for_watcher,
+                &state_for_watcher,
+                &per_monitor_for_watcher,
+                &rebuild_for_watcher,
+            );
+        });
+    }
+}
+
+/// Handler for config file save events: load → merge → apply or notify.
+///
+/// Non-blocking and best-effort — any failure is logged and (if possible)
+/// surfaced to the user via desktop notification, but never takes the
+/// dock down.
+fn on_config_save(
+    path: &std::path::Path,
+    state: &Rc<RefCell<DockState>>,
+    per_monitor: &Rc<RefCell<Vec<dock_windows::MonitorDock>>>,
+    rebuild: &Rc<dyn Fn()>,
+) {
+    let raw = match config_file::load_config_file(path) {
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("Config reload failed: {}", e);
+            config_file::notify_user("nwg-dock: config error", &format!("{}", e));
+            return;
+        }
+    };
+
+    // Re-run merge with the original ArgMatches so CLI provenance still wins.
+    let cli_snapshot = state.borrow().config.as_ref().clone();
+    let matches = state.borrow().args_matches.clone();
+    let new = config_file::merge(&matches, cli_snapshot, raw);
+
+    let result = config_file::apply_config_change(new, state, per_monitor, rebuild);
+
+    match result {
+        config_file::DiffResult::NoChange => {
+            log::debug!("Config saved; no tracked fields changed");
+        }
+        config_file::DiffResult::Applicable { applied } => {
+            let body = format!("Applied: {}", applied.join(", "));
+            config_file::notify_user("nwg-dock: config reloaded", &body);
+        }
+        config_file::DiffResult::RestartRequired { fields } => {
+            let needs_restart: Vec<&str> = fields
+                .iter()
+                .filter(|f| config_file::is_restart_required(f))
+                .copied()
+                .collect();
+            let body = format!("Restart required for: {}", needs_restart.join(", "));
+            config_file::notify_user("nwg-dock: config reloaded", &body);
+        }
+    }
 }
 
 /// Auto-detect launcher: hide button if command not found on PATH.
