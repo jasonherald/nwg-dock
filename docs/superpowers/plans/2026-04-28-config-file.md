@@ -12,6 +12,190 @@
 
 **Branch:** `feat/config-file` (already created; the spec lives there as commit `2546c9a`).
 
+**Prerequisite:** `nwg-common` 0.3.1 must be released to crates.io with `Serialize` + `Deserialize` derives on `WmOverride`. The dock's `Cargo.toml` already has `nwg-common = "0.3"` (caret range), so 0.3.1 picks up automatically. Phase 0 below covers this.
+
+---
+
+## Phase 0: Upstream nwg-common 0.3.1 — `WmOverride` serde derives
+
+This is a prerequisite cross-repo task. Until it lands and publishes, Task 3 here won't compile because `Option<WmOverride>` in `BehaviorSection` requires `Deserialize`. Phase 0 lives in `~/source/nwg-common`, not the dock repo.
+
+### Task 0a: Add `Serialize` + `Deserialize` derives to `WmOverride`
+
+**Files (in `~/source/nwg-common`):**
+- Modify: `src/compositor/mod.rs`
+
+- [ ] **Step 1: Branch from main in nwg-common**
+
+```bash
+git -C ~/source/nwg-common checkout -b feat/wm-override-serde
+```
+
+- [ ] **Step 2: Add the derives**
+
+In `~/source/nwg-common/src/compositor/mod.rs`, change the `WmOverride` enum's derive line:
+
+```rust
+// Before:
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum WmOverride {
+
+// After:
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq,
+    clap::ValueEnum,
+    serde::Serialize, serde::Deserialize,
+)]
+#[serde(rename_all = "kebab-case")]
+pub enum WmOverride {
+```
+
+The `rename_all = "kebab-case"` makes variants serialize as `"hyprland"` / `"sway"` / `"uwsm"` (which match clap's default ValueEnum lowercasing of single-word variants — keeps user-facing wire format consistent between CLI and TOML).
+
+- [ ] **Step 3: Add a round-trip test**
+
+In `~/source/nwg-common/src/compositor/mod.rs`'s `mod tests` block (or create one if it doesn't exist):
+
+```rust
+#[test]
+fn wm_override_serde_round_trip() {
+    for variant in [WmOverride::Hyprland, WmOverride::Sway, WmOverride::Uwsm] {
+        let s = serde_json::to_string(&variant).expect("serialize");
+        let parsed: WmOverride = serde_json::from_str(&s).expect("deserialize");
+        assert_eq!(variant, parsed);
+    }
+}
+
+#[test]
+fn wm_override_serde_uses_kebab_case() {
+    assert_eq!(serde_json::to_string(&WmOverride::Hyprland).unwrap(), r#""hyprland""#);
+    assert_eq!(serde_json::to_string(&WmOverride::Sway).unwrap(), r#""sway""#);
+    assert_eq!(serde_json::to_string(&WmOverride::Uwsm).unwrap(), r#""uwsm""#);
+}
+```
+
+- [ ] **Step 4: Build, test, lint, fmt**
+
+```bash
+cd ~/source/nwg-common
+cargo test
+cargo clippy --all-targets -- -D warnings
+cargo fmt --all
+```
+
+All clean.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git -C ~/source/nwg-common add src/compositor/mod.rs
+git -C ~/source/nwg-common commit -m "Derive Serialize/Deserialize on WmOverride
+
+Enables consumers (e.g., nwg-dock #33) to deserialize WmOverride from
+TOML/JSON config files. Variants serialize as kebab-case strings —
+\"hyprland\" / \"sway\" / \"uwsm\" — matching clap's ValueEnum lowercase
+form so the same wire format works for CLI and config-file consumers.
+
+Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
+```
+
+### Task 0b: Open PR + wait for review
+
+- [ ] **Step 1: Push branch (request user go-ahead first per workflow rule)**
+
+```bash
+git -C ~/source/nwg-common push -u origin feat/wm-override-serde
+```
+
+- [ ] **Step 2: Open PR**
+
+```bash
+gh -R jasonherald/nwg-common pr create --title "Derive Serialize/Deserialize on WmOverride" --body "..."
+```
+
+PR body explains the change, references jasonherald/nwg-dock#33 as the consumer, and notes the kebab-case rename matches clap's ValueEnum default lowercasing.
+
+- [ ] **Step 3: Wait for CodeRabbit + user merge.** Per workflow rules: "wait on the rabbit." Don't proceed to release until merged.
+
+### Task 0c: Cut nwg-common 0.3.1 release
+
+- [ ] **Step 1: After merge, sync local main**
+
+```bash
+git -C ~/source/nwg-common checkout main
+git -C ~/source/nwg-common pull --ff-only
+```
+
+- [ ] **Step 2: Bump version to 0.3.1**
+
+In `~/source/nwg-common/Cargo.toml`, change:
+
+```toml
+version = "0.3.0"
+```
+
+to:
+
+```toml
+version = "0.3.1"
+```
+
+Update `~/source/nwg-common/CHANGELOG.md` (if it exists) with a `[0.3.1]` entry noting the new derive.
+
+- [ ] **Step 3: Verify release-readiness**
+
+```bash
+cargo publish --dry-run --manifest-path ~/source/nwg-common/Cargo.toml
+```
+
+Expected: clean dry-run output. If it complains about uncommitted changes, commit the version bump first.
+
+- [ ] **Step 4: Commit + tag the release**
+
+```bash
+git -C ~/source/nwg-common add Cargo.toml CHANGELOG.md
+git -C ~/source/nwg-common commit -m "Release 0.3.1: Serialize/Deserialize on WmOverride"
+git -C ~/source/nwg-common tag -a v0.3.1 -m "v0.3.1"
+git -C ~/source/nwg-common push origin main
+git -C ~/source/nwg-common push origin v0.3.1
+```
+
+- [ ] **Step 5: Publish to crates.io (REQUIRES EXPLICIT USER GO-AHEAD)**
+
+```bash
+cargo publish --manifest-path ~/source/nwg-common/Cargo.toml
+```
+
+Wait for crates.io to index (usually <60s; check with `cargo search nwg-common`).
+
+### Task 0d: Bump nwg-common dep in nwg-dock
+
+**Files:**
+- Modify: `Cargo.toml` (in nwg-dock)
+- Modify: `Cargo.lock`
+
+- [ ] **Step 1: Force-update the lockfile to pull 0.3.1**
+
+```bash
+cd /data/source/nwg-dock
+cargo update -p nwg-common --precise 0.3.1
+```
+
+- [ ] **Step 2: Verify build still passes**
+
+```bash
+cargo build
+```
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add Cargo.lock
+git commit -m "Bump nwg-common to 0.3.1 for WmOverride serde derives (#33)"
+```
+
+Phase 0 complete. Now proceed to Phase 1 (Task 1 onward) in the dock repo.
+
 ---
 
 ## File structure
