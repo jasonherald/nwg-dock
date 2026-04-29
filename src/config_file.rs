@@ -703,6 +703,87 @@ pub fn notify_user(summary: &str, body: &str) {
     }
 }
 
+// ─── Watcher ───────────────────────────────────────────────────────────────
+
+/// Watches the config file's parent directory via inotify and invokes
+/// `on_change` on every save. Mirrors `nwg_common::config::css::watch_css`:
+/// non-recursive watch on the parent dir, GLib-debounced (100ms) timer
+/// drains events on the main loop, callback fires once per debounce
+/// window regardless of how many save events arrived.
+///
+/// Setup failures (parent dir doesn't exist, inotify unavailable, etc.)
+/// are logged and silently fall through to "no hot-reload". The dock
+/// keeps running on whatever it loaded at cold start.
+pub fn watch_config_file<F>(path: std::path::PathBuf, on_change: F)
+where
+    F: Fn() + 'static,
+{
+    use notify::{RecursiveMode, Watcher};
+
+    let Some(parent) = path.parent().map(|p| p.to_path_buf()) else {
+        log::warn!("Config watcher: no parent dir for {}", path.display());
+        return;
+    };
+    if !parent.exists() {
+        log::warn!(
+            "Config watcher: parent dir {} does not exist",
+            parent.display()
+        );
+        return;
+    }
+
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let watched_path = path.clone();
+    let mut watcher = match notify::recommended_watcher(move |res: Result<notify::Event, _>| {
+        let Ok(event) = res else {
+            return;
+        };
+        if !matches!(
+            event.kind,
+            notify::EventKind::Modify(_)
+                | notify::EventKind::Create(_)
+                | notify::EventKind::Remove(_)
+        ) {
+            return;
+        }
+        // Filter: only react to events on our specific file.
+        if event.paths.iter().any(|p| p == &watched_path) {
+            let _ = tx.send(());
+        }
+    }) {
+        Ok(w) => w,
+        Err(e) => {
+            log::warn!("Failed to create config watcher: {}", e);
+            return;
+        }
+    };
+
+    if let Err(e) = watcher.watch(&parent, RecursiveMode::NonRecursive) {
+        log::warn!("Failed to watch config dir {}: {}", parent.display(), e);
+        return;
+    }
+
+    // Keep the watcher alive on the GLib main loop; debounce reload
+    // events. The Rc<RefCell<_>> wrapper holds the Watcher inside the
+    // closure so it lives for the lifetime of the GLib timer.
+    let watcher_holder = std::rc::Rc::new(std::cell::RefCell::new(Some(watcher)));
+    let on_change = std::rc::Rc::new(on_change);
+    gtk4::glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
+        // Drain any queued events so we only fire on_change once per
+        // debounce window.
+        let mut changed = false;
+        while rx.try_recv().is_ok() {
+            changed = true;
+        }
+        if changed {
+            (on_change)();
+        }
+        // Keep the watcher alive through the timer's lifetime.
+        let _keep = watcher_holder.clone();
+        gtk4::glib::ControlFlow::Continue
+    });
+}
+
 // ─── Default config path ───────────────────────────────────────────────────
 
 /// Returns the default config file path:
