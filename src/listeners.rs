@@ -25,10 +25,14 @@ const LIVENESS_TICK_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Bundles the dependencies needed by the monitor watcher and liveness tick
 /// paths so entrypoint signatures stay short and consistent.
+///
+/// `state` carries the live `Rc<DockConfig>` (read at fire time so hot-reload
+/// is observed); the prior `config: Rc<DockConfig>` field was a startup-time
+/// snapshot that wouldn't see config-file edits.
 pub struct ReconcileContext {
     pub app: gtk4::Application,
     pub per_monitor: Rc<RefCell<Vec<MonitorDock>>>,
-    pub config: Rc<DockConfig>,
+    pub state: Rc<RefCell<DockState>>,
     pub rebuild_fn: Rc<dyn Fn()>,
     pub hotspot_ctx: Option<Rc<crate::ui::hotspot::HotspotContext>>,
 }
@@ -175,8 +179,10 @@ pub fn setup_monitor_watcher(ctx: Rc<ReconcileContext>) {
 /// so log messages can clearly distinguish "compositor destroyed our surface"
 /// (a recovery) from "user unplugged a monitor" (a topology change).
 fn reconcile_monitors(ctx: &ReconcileContext) {
+    // Read live config from state — hot-reload may have swapped it in.
+    let cfg = ctx.state.borrow().config.clone();
     let hotspot_ctx = ctx.hotspot_ctx.as_deref();
-    let current_monitors = monitor::resolve_monitors(&ctx.config);
+    let current_monitors = monitor::resolve_monitors(&cfg);
     let monitor_map: std::collections::HashMap<String, gtk4::gdk::Monitor> =
         current_monitors.into_iter().collect();
     let current_names: Vec<String> = monitor_map.keys().cloned().collect();
@@ -215,7 +221,7 @@ fn reconcile_monitors(ctx: &ReconcileContext) {
         &ctx.per_monitor,
         &to_create,
         &monitor_map,
-        &ctx.config,
+        &cfg,
         hotspot_ctx,
     );
     (ctx.rebuild_fn)();
@@ -307,7 +313,8 @@ fn remove_zombie_docks(
 /// runs about as often as real monitor state changes (rare).
 pub fn setup_liveness_tick(ctx: Rc<ReconcileContext>) {
     glib::timeout_add_local(LIVENESS_TICK_INTERVAL, move || {
-        if needs_reconcile(&ctx.per_monitor, &ctx.config) {
+        let cfg = ctx.state.borrow().config.clone();
+        if needs_reconcile(&ctx.per_monitor, &cfg) {
             log::info!("Liveness tick detected state drift, reconciling");
             reconcile_monitors(&ctx);
         }

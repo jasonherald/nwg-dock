@@ -1,3 +1,4 @@
+use crate::config::DockConfig;
 use gtk4::glib;
 use nwg_common::compositor::{Compositor, WmClient};
 use std::collections::HashMap;
@@ -6,6 +7,18 @@ use std::rc::Rc;
 
 /// Window/monitor tracking state.
 pub struct DockState {
+    /// Currently-applied configuration. Hot-reload swaps this in place;
+    /// long-lived consumers (cursor poller, hotspot timeout, rebuild)
+    /// read `state.borrow().config.field` at call/tick time so they pick
+    /// up the new values without re-plumbing.
+    pub config: Rc<DockConfig>,
+
+    /// Original `ArgMatches` from cold start. Stashed so hot-reload can
+    /// re-run `merge(matches, cli_config, file)` with the same CLI
+    /// provenance — i.e., a CLI-passed value still wins after every
+    /// reload, not just at startup.
+    pub args_matches: clap::ArgMatches,
+
     pub clients: Vec<WmClient>,
     pub active_client: Option<WmClient>,
     pub pinned: Vec<String>,
@@ -54,8 +67,15 @@ pub struct DockState {
 }
 
 impl DockState {
-    pub fn new(app_dirs: Vec<PathBuf>, compositor: Rc<dyn Compositor>) -> Self {
+    pub fn new(
+        app_dirs: Vec<PathBuf>,
+        compositor: Rc<dyn Compositor>,
+        config: Rc<DockConfig>,
+        args_matches: clap::ArgMatches,
+    ) -> Self {
         Self {
+            config,
+            args_matches,
             clients: Vec::new(),
             active_client: None,
             pinned: Vec::new(),

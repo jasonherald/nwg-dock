@@ -1,4 +1,3 @@
-use crate::config::DockConfig;
 use crate::context::DockContext;
 use crate::dock_windows::MonitorDock;
 use crate::state::DockState;
@@ -21,14 +20,12 @@ use std::rc::{Rc, Weak};
 /// current rebuild finishes.
 pub fn create_rebuild_fn(
     per_monitor: &Rc<RefCell<Vec<MonitorDock>>>,
-    config: &Rc<DockConfig>,
     state: &Rc<RefCell<DockState>>,
     data_home: &Rc<std::path::PathBuf>,
     pinned_file: &Rc<std::path::PathBuf>,
     compositor: &Rc<dyn Compositor>,
 ) -> Rc<dyn Fn()> {
     let per_monitor = Rc::clone(per_monitor);
-    let config = Rc::clone(config);
     let state = Rc::clone(state);
     let data_home = Rc::clone(data_home);
     let pinned_file = Rc::clone(pinned_file);
@@ -67,8 +64,12 @@ pub fn create_rebuild_fn(
                 let rebuild_ref: Rc<dyn Fn()> =
                     holder.borrow().upgrade().unwrap_or_else(|| Rc::new(|| {}));
 
+                // Read live config from state. Brief borrow; dropped before
+                // dock_box::build is called (which itself may borrow state).
+                let cfg_snapshot = state.borrow().config.clone();
+
                 let ctx = DockContext {
-                    config: Rc::clone(&config),
+                    config: cfg_snapshot,
                     state: Rc::clone(&state),
                     data_home: Rc::clone(&data_home),
                     pinned_file: Rc::clone(&pinned_file),

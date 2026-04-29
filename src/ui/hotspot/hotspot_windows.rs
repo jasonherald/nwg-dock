@@ -66,7 +66,9 @@ pub(super) fn start_hotspot_windows(
     state: &Rc<RefCell<DockState>>,
     app: &gtk4::Application,
 ) -> Rc<HotspotContext> {
-    let hide_timeout = config.hide_timeout;
+    // `position` is a one-shot setup value — hotspot windows are created
+    // anchored to this edge. A position change requires window recreate
+    // (handled via reconcile_monitors), so it doesn't hot-reload here.
     let position = config.position;
 
     // Shared hide timer state
@@ -90,7 +92,9 @@ pub(super) fn start_hotspot_windows(
         hotspots,
     });
 
-    // Poll the hide timer to actually hide dock windows
+    // Poll the hide timer to actually hide dock windows. Reads
+    // `hide_timeout` from state at every tick so hot-reload of the
+    // value applies immediately.
     let docks = Rc::clone(per_monitor);
     let state = Rc::clone(state);
     glib::timeout_add_local(
@@ -98,10 +102,11 @@ pub(super) fn start_hotspot_windows(
         move || {
             let mut left = left_at.borrow_mut();
             if let Some(when) = *left {
-                // Don't hide while a popover menu is open or drag in progress
+                // Read live config + state in the same brief borrow.
                 let s = state.borrow();
                 let keep_visible =
                     s.popover_open || s.drag_pending || s.drag_source_index.is_some();
+                let hide_timeout = s.config.hide_timeout;
                 drop(s);
 
                 if keep_visible {

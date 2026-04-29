@@ -1,4 +1,5 @@
 use clap::{Parser, ValueEnum};
+use std::path::PathBuf;
 
 /// Known Go-style single-dash flags for the dock binary.
 const LEGACY_FLAGS: &[&str] = &[
@@ -23,7 +24,8 @@ pub fn normalize_legacy_flags(args: impl Iterator<Item = String>) -> Vec<String>
 }
 
 /// Dock position on screen edge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Position {
     Bottom,
     Top,
@@ -32,7 +34,8 @@ pub enum Position {
 }
 
 /// Content alignment within the dock.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Alignment {
     Start,
     Center,
@@ -40,7 +43,8 @@ pub enum Alignment {
 }
 
 /// Layer-shell layer.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Layer {
     Overlay,
     Top,
@@ -170,6 +174,17 @@ pub struct DockConfig {
     /// Window manager override (auto-detected from environment if not specified)
     #[arg(long, value_enum)]
     pub wm: Option<nwg_common::compositor::WmOverride>,
+
+    /// Path to a TOML config file. Overrides the XDG default location
+    /// (`$XDG_CONFIG_HOME/nwg-dock-hyprland/config.toml`). See
+    /// `data/nwg-dock-hyprland/config.example.toml` for the schema.
+    #[arg(long, value_name = "PATH")]
+    pub config: Option<PathBuf>,
+
+    /// Print the effective merged config (CLI + file + defaults) to stdout
+    /// and exit. Useful for verifying which fields came from where.
+    #[arg(long)]
+    pub print_config: bool,
 }
 
 impl DockConfig {
@@ -378,6 +393,33 @@ mod tests {
             .map(String::from);
         let normalized = normalize_legacy_flags(args);
         assert_eq!(normalized, vec!["test", "-unknown=value", "-d"]);
+    }
+
+    #[test]
+    fn config_flag_default_is_none() {
+        let cfg = DockConfig::parse_from(["test"]);
+        assert!(cfg.config.is_none());
+    }
+
+    #[test]
+    fn config_flag_takes_path() {
+        let cfg = DockConfig::parse_from(["test", "--config", "/tmp/x.toml"]);
+        assert_eq!(
+            cfg.config.as_deref(),
+            Some(std::path::Path::new("/tmp/x.toml"))
+        );
+    }
+
+    #[test]
+    fn print_config_flag_default_off() {
+        let cfg = DockConfig::parse_from(["test"]);
+        assert!(!cfg.print_config);
+    }
+
+    #[test]
+    fn print_config_flag_on() {
+        let cfg = DockConfig::parse_from(["test", "--print-config"]);
+        assert!(cfg.print_config);
     }
 
     #[test]

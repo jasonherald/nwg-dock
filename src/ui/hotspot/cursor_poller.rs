@@ -1,4 +1,3 @@
-use crate::config::DockConfig;
 use crate::dock_windows::MonitorDock;
 use crate::state::DockState;
 use gtk4::glib;
@@ -22,14 +21,10 @@ const MONITOR_REFRESH_POLLS: u32 = 50;
 /// Monitor↔window mapping uses output connector names, not array indices.
 pub(super) fn start_cursor_poller(
     per_monitor: &Rc<RefCell<Vec<MonitorDock>>>,
-    config: &DockConfig,
     state: &Rc<RefCell<DockState>>,
     compositor: &Rc<dyn Compositor>,
 ) {
     let docks = Rc::clone(per_monitor);
-    let position = config.position;
-    let hide_timeout = config.hide_timeout;
-    let suppress_on_fullscreen = !config.no_fullscreen_suppress;
     let state = Rc::clone(state);
     let compositor = Rc::clone(compositor);
     // Track when cursor last left the dock area (for hide delay)
@@ -60,6 +55,14 @@ pub(super) fn start_cursor_poller(
                 Some((x, y)) => CursorPos { x, y },
                 None => return glib::ControlFlow::Continue,
             };
+
+            // Read live config from state at every tick so hot-reload of
+            // hide_timeout / hotspot_delay / position / no_fullscreen_suppress
+            // takes effect without restarting the dock.
+            let cfg = state.borrow().config.clone();
+            let position = cfg.position;
+            let hide_timeout = cfg.hide_timeout;
+            let suppress_on_fullscreen = !cfg.no_fullscreen_suppress;
 
             // Detect topology change: output names changed means reconciliation happened
             let current_outputs: Vec<String> = docks

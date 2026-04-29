@@ -1,4 +1,5 @@
 mod config;
+mod config_file;
 mod context;
 mod dock_windows;
 mod events;
@@ -10,7 +11,7 @@ mod ui;
 
 use crate::config::DockConfig;
 use crate::state::DockState;
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 use gtk4::prelude::*;
 use nwg_common::config::paths;
 use nwg_common::desktop::dirs::get_app_dirs;
@@ -24,14 +25,68 @@ use std::rc::Rc;
 
 fn main() {
     nwg_common::process::handle_dump_args();
-    let mut config = DockConfig::parse_from(config::normalize_legacy_flags(std::env::args()));
+    let raw_args = config::normalize_legacy_flags(std::env::args());
 
-    if config.debug {
-        env_logger::Builder::from_default_env()
-            .filter_level(log::LevelFilter::Debug)
-            .init();
+    let cmd = DockConfig::command();
+    let matches = match cmd.try_get_matches_from(raw_args) {
+        Ok(m) => m,
+        Err(e) => e.exit(),
+    };
+    let cli_config = match DockConfig::from_arg_matches(&matches) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("error: {}", e);
+            std::process::exit(2);
+        }
+    };
+
+    // Initialize the logger at Debug filter so debug-level events from
+    // any source can flow once we finish merging. The CLI-or-file
+    // `debug` decision is made via log::set_max_level so it can be
+    // updated AFTER config-file merge — the file may set debug=true
+    // even when the CLI didn't.
+    env_logger::Builder::from_default_env()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
+    log::set_max_level(if cli_config.debug {
+        log::LevelFilter::Debug
     } else {
-        env_logger::init();
+        log::LevelFilter::Info
+    });
+
+    // Resolve config file path (CLI override or XDG default), load, merge.
+    let config_path = cli_config
+        .config
+        .clone()
+        .unwrap_or_else(config_file::default_config_path);
+    let file = match config_file::load_config_file(&config_path) {
+        Ok(f) => f,
+        Err(e) => {
+            log::error!("Config file error at {}: {}", config_path.display(), e);
+            // Best-effort notify; cold start has no prior state to keep,
+            // so we still exit on error.
+            config_file::notify_user(
+                "nwg-dock: config error",
+                &format!("{}: {}", config_path.display(), e),
+            );
+            std::process::exit(1);
+        }
+    };
+    let mut config = config_file::merge(&matches, cli_config, file);
+
+    // Now that the file has been merged in, apply the final debug
+    // setting. If the file flips debug on (and the CLI didn't), this
+    // is where it takes effect.
+    log::set_max_level(if config.debug {
+        log::LevelFilter::Debug
+    } else {
+        log::LevelFilter::Info
+    });
+
+    // --print-config: dump and exit before any GTK / compositor side effects.
+    if config.print_config {
+        print!("{}", config_file::print_effective_config(&config));
+        std::process::exit(0);
     }
 
     if config.autohide && config.resident {
@@ -71,65 +126,69 @@ fn main() {
         .application_id("com.mac-dock.hyprland")
         .build();
 
-    let config = Rc::new(config);
-    let data_home = Rc::new(data_home);
-    let pinned_file = Rc::new(pinned_file);
-    let css_path = Rc::new(css_path);
+    let bootstrap = Rc::new(ActivateParams {
+        css_path: Rc::new(css_path),
+        config: Rc::new(config),
+        matches: Rc::new(matches),
+        app_dirs,
+        compositor,
+        pinned_file: Rc::new(pinned_file),
+        data_home: Rc::new(data_home),
+        sig_rx,
+    });
 
     app.connect_activate(move |app| {
-        activate_dock(
-            app,
-            &css_path,
-            &config,
-            &app_dirs,
-            &compositor,
-            &pinned_file,
-            &data_home,
-            &sig_rx,
-        );
+        activate_dock(app, &bootstrap);
     });
 
     app.run_with_args::<String>(&[]);
 }
 
+/// Bundles everything `activate_dock` needs from `main()` so the
+/// signature stays at one parameter (per CLAUDE.md "never pass 7+
+/// individual refs"). Built once in `main`, cloned on each
+/// `connect_activate` callback. Distinct from `DockContext` (which
+/// covers the rebuild path's narrower needs).
+struct ActivateParams {
+    css_path: Rc<std::path::PathBuf>,
+    config: Rc<DockConfig>,
+    matches: Rc<clap::ArgMatches>,
+    app_dirs: Vec<std::path::PathBuf>,
+    compositor: Rc<dyn nwg_common::compositor::Compositor>,
+    pinned_file: Rc<std::path::PathBuf>,
+    data_home: Rc<std::path::PathBuf>,
+    sig_rx: Rc<std::sync::mpsc::Receiver<signals::WindowCommand>>,
+}
+
 /// Sets up the dock UI: state, monitors, windows, rebuild function, and listeners.
-#[allow(clippy::too_many_arguments)]
-fn activate_dock(
-    app: &gtk4::Application,
-    css_path: &Rc<std::path::PathBuf>,
-    config: &Rc<DockConfig>,
-    app_dirs: &[std::path::PathBuf],
-    compositor: &Rc<dyn nwg_common::compositor::Compositor>,
-    pinned_file: &Rc<std::path::PathBuf>,
-    data_home: &Rc<std::path::PathBuf>,
-    sig_rx: &Rc<std::sync::mpsc::Receiver<signals::WindowCommand>>,
-) {
-    ui::css::load_dock_css(css_path, config.opacity);
+fn activate_dock(app: &gtk4::Application, params: &ActivateParams) {
+    ui::css::load_dock_css(&params.css_path, params.config.opacity);
     let _hold = app.hold();
 
     let state = Rc::new(RefCell::new(DockState::new(
-        app_dirs.to_vec(),
-        Rc::clone(compositor),
+        params.app_dirs.clone(),
+        Rc::clone(&params.compositor),
+        Rc::clone(&params.config),
+        (*params.matches).clone(),
     )));
-    state.borrow_mut().pinned = pinning::load_pinned(pinned_file);
+    state.borrow_mut().pinned = pinning::load_pinned(&params.pinned_file);
     state.borrow_mut().locked = ui::dock_menu::load_lock_state();
-    state.borrow_mut().wm_class_to_desktop_id = build_wm_class_map(app_dirs);
+    state.borrow_mut().wm_class_to_desktop_id = build_wm_class_map(&params.app_dirs);
     if let Err(e) = state.borrow_mut().refresh_clients() {
         log::error!("Couldn't list clients: {}", e);
     }
 
-    let monitors = monitor::resolve_monitors(config);
+    let monitors = monitor::resolve_monitors(&params.config);
 
-    let docks = dock_windows::create_dock_windows(app, &monitors, config);
+    let docks = dock_windows::create_dock_windows(app, &monitors, &params.config);
     let per_monitor = Rc::new(RefCell::new(docks));
 
     let rebuild = rebuild::create_rebuild_fn(
         &per_monitor,
-        config,
         &state,
-        data_home,
-        pinned_file,
-        compositor,
+        &params.data_home,
+        &params.pinned_file,
+        &params.compositor,
     );
     rebuild();
 
@@ -137,28 +196,126 @@ fn activate_dock(
         dock.win.present();
     }
 
-    let hotspot_ctx = if config.autohide {
-        listeners::setup_autohide(&per_monitor, config, &state, compositor, app)
+    let hotspot_ctx = if params.config.autohide {
+        listeners::setup_autohide(
+            &per_monitor,
+            &params.config,
+            &state,
+            &params.compositor,
+            app,
+        )
     } else {
         None
     };
     events::start_event_listener(
         Rc::clone(&state),
         Rc::clone(&rebuild),
-        Rc::clone(compositor),
+        Rc::clone(&params.compositor),
     );
-    listeners::setup_pin_watcher(pinned_file, &rebuild);
-    listeners::setup_signal_poller(app, &per_monitor, sig_rx);
+    listeners::setup_pin_watcher(&params.pinned_file, &rebuild);
+    listeners::setup_signal_poller(app, &per_monitor, &params.sig_rx);
 
     let reconcile_ctx = Rc::new(listeners::ReconcileContext {
         app: app.clone(),
         per_monitor: Rc::clone(&per_monitor),
-        config: Rc::clone(config),
+        state: Rc::clone(&state),
         rebuild_fn: Rc::clone(&rebuild),
         hotspot_ctx,
     });
     listeners::setup_monitor_watcher(Rc::clone(&reconcile_ctx));
     listeners::setup_liveness_tick(reconcile_ctx);
+
+    // Hot-reload pipeline: watch the config file, on save re-load,
+    // re-merge, and apply or notify per the diff result.
+    let config_path = params
+        .config
+        .config
+        .clone()
+        .unwrap_or_else(config_file::default_config_path);
+    {
+        let state_for_watcher = Rc::clone(&state);
+        let per_monitor_for_watcher = Rc::clone(&per_monitor);
+        let rebuild_for_watcher = Rc::clone(&rebuild);
+        let path_for_watcher = config_path.clone();
+
+        config_file::watch_config_file(config_path, move || {
+            on_config_save(
+                &path_for_watcher,
+                &state_for_watcher,
+                &per_monitor_for_watcher,
+                &rebuild_for_watcher,
+            );
+        });
+    }
+}
+
+/// Handler for config file save events: load → merge → apply or notify.
+///
+/// Non-blocking and best-effort — any failure is logged and (if possible)
+/// surfaced to the user via desktop notification, but never takes the
+/// dock down.
+fn on_config_save(
+    path: &std::path::Path,
+    state: &Rc<RefCell<DockState>>,
+    per_monitor: &Rc<RefCell<Vec<dock_windows::MonitorDock>>>,
+    rebuild: &Rc<dyn Fn()>,
+) {
+    let raw = match config_file::load_config_file(path) {
+        Ok(r) => r,
+        Err(e) => {
+            log::error!("Config reload failed: {}", e);
+            config_file::notify_user("nwg-dock: config error", &format!("{}", e));
+            return;
+        }
+    };
+
+    // Re-run merge with the original ArgMatches AND a fresh CLI-only
+    // baseline. Cloning state.config would carry the previous file
+    // overlay forward — if a user removes `icon-size` from the file,
+    // we'd retain the old file value instead of falling back to CLI
+    // defaults. Rebuilding cli_snapshot from the stored matches is the
+    // clean baseline.
+    let matches = state.borrow().args_matches.clone();
+    let cli_snapshot = match DockConfig::from_arg_matches(&matches) {
+        Ok(c) => c,
+        Err(e) => {
+            log::error!(
+                "Failed to rebuild CLI baseline from stored ArgMatches: {}",
+                e
+            );
+            return;
+        }
+    };
+    let new = config_file::merge(&matches, cli_snapshot, raw);
+
+    let result = config_file::apply_config_change(new, state, per_monitor, rebuild);
+
+    match result {
+        config_file::DiffResult::NoChange => {
+            log::debug!("Config saved; no tracked fields changed");
+        }
+        config_file::DiffResult::Applicable { applied } => {
+            let body = format!("Applied: {}", applied.join(", "));
+            config_file::notify_user("nwg-dock: config reloaded", &body);
+        }
+        config_file::DiffResult::RestartRequired {
+            restart_fields,
+            applied,
+        } => {
+            // Mixed save: list both halves so the user sees what landed
+            // immediately AND what's still pending until restart.
+            let body = if applied.is_empty() {
+                format!("Restart required for: {}", restart_fields.join(", "))
+            } else {
+                format!(
+                    "Applied: {}; Restart required for: {}",
+                    applied.join(", "),
+                    restart_fields.join(", ")
+                )
+            };
+            config_file::notify_user("nwg-dock: config reloaded", &body);
+        }
+    }
 }
 
 /// Auto-detect launcher: hide button if command not found on PATH.
