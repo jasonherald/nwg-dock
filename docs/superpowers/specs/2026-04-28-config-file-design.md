@@ -160,8 +160,9 @@ enum ConfigError {
 | `merge` | `fn(matches: &ArgMatches, cli: DockConfig, file: Option<RawConfigFile>) -> DockConfig` | For each field, `matches.value_source(field) == ValueSource::CommandLine` ⇒ keep CLI; else `file.section.field.is_some()` ⇒ use file; else keep CLI's default. |
 | `print_effective_config` | `fn(&DockConfig) -> String` | Round-trips DockConfig → `RawConfigFile` → `toml::to_string_pretty`. Outputs sectioned form with all fields present. |
 | `watch_config_file` | `fn(path: PathBuf, on_reload: impl Fn() + 'static)` | Mirrors `nwg_common::config::css::watch_css`: notify-rs on parent dir, GLib debounced timer (100ms), callback on changes. |
-| `apply_config_change` | `fn(old: &DockConfig, new: DockConfig, ctx: &DockContext) -> ApplyResult` | Diffs old vs new. Returns `ApplyResult::RestartRequired(Vec<&'static str>)` if any of the seven restart-required fields differ; else applies field-by-field and returns `Applied(Vec<&'static str>)` or `NoChange`. |
-| `notify_user` | Function pointer: `static NOTIFIER: AtomicPtr<NotifyFn> = …;` indirected so tests can install a stub. Default points at a `notify-rust` wrapper. | Best-effort; failure to deliver logs a warning. |
+| `apply_config_change` | `fn(new: DockConfig, state: &Rc<RefCell<DockState>>, per_monitor: &Rc<RefCell<Vec<MonitorDock>>>, rebuild: &Rc<dyn Fn()>) -> DiffResult` | Diffs `state.borrow().config` against `new`. On `Applicable`, swaps `state.config` to `new` and applies the per-field GTK updates. On `RestartRequired`, applies the hot-reloadable subset and swaps `state.config` to a "partial new" that retains `old`'s values for the seven restart-required fields, so subsequent reloads keep flagging them. On `NoChange`, no-op. |
+| `diff_config` | `fn(old: &DockConfig, new: &DockConfig) -> DiffResult` | Pure comparison. Returns `RestartRequired { restart_fields, applied }` if any restart-required field differs (with hot-reloadable changes still listed in `applied`), `Applicable { applied }` if only hot-reloadable fields differ, else `NoChange`. |
+| `notify_user` | `OnceLock<Mutex<Option<Box<dyn Fn(&str, &str) + Send + Sync>>>>` slot for test indirection; default path uses `notify_rust::Notification`. `install_test_notifier` / `clear_test_notifier` are `#[cfg(test)]` only. | Best-effort; D-Bus failures log at warn level. |
 
 ### Apply-path field map
 

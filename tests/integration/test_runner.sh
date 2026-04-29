@@ -23,7 +23,12 @@ NC='\033[0m'
 cleanup() {
     echo ""
     echo "Cleaning up..."
+    # Kill every background dock this script may have started — DOCK_PID
+    # for the binary smoke test, HOTRELOAD_PID for the hot-reload smoke.
+    # Either may be unset depending on how far the script got before an
+    # assertion failed; quoting the dereferences with :- handles that.
     [ -n "${DOCK_PID:-}" ] && kill "$DOCK_PID" 2>/dev/null || true
+    [ -n "${HOTRELOAD_PID:-}" ] && kill "$HOTRELOAD_PID" 2>/dev/null || true
     [ -n "${SWAY_PID:-}" ] && kill "$SWAY_PID" 2>/dev/null || true
     sleep 1
     [ -n "${TEST_RUNTIME:-}" ] && rm -rf "$TEST_RUNTIME" 2>/dev/null || true
