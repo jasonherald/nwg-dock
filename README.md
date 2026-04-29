@@ -1,5 +1,8 @@
 # nwg-dock
 
+[![crates.io](https://img.shields.io/crates/v/nwg-dock.svg)](https://crates.io/crates/nwg-dock)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A macOS-style dock for [Hyprland](https://hyprland.org/) and [Sway](https://swaywm.org/), written in Rust.
 
 **Renamed from `nwg-dock-hyprland`.** The Rust port supports both Hyprland and Sway through one binary (Compositor trait + runtime `--wm` auto-detection), so the compositor-specific name didn't fit anymore. Existing users: `make install` installs a `nwg-dock-hyprland` → `nwg-dock` symlink so your `exec-once = nwg-dock-hyprland …` autostart line keeps working. See [Migrating from `nwg-dock-hyprland`](#migrating-from-nwg-dock-hyprland) below.
@@ -47,9 +50,19 @@ sudo apt install libgtk-4-dev libgtk4-layer-shell-dev
 sudo dnf install gtk4-devel gtk4-layer-shell-devel
 ```
 
-### `make install` — three invocations
+### From crates.io (recommended for end users)
 
-The Makefile supports three ways to install depending on where you want the binary to land.
+```bash
+cargo install nwg-dock
+```
+
+Lands the binary at `~/.cargo/bin/nwg-dock`. The default style sheet is created on first run by copying from the system data dir if available, otherwise the dock falls back to its embedded GTK4 defaults — so the binary alone is enough to launch the dock; you only need `make install` if you want the bundled `style.css` and the `nwg-dock-hyprland` legacy symlink.
+
+**Migrating from `nwg-dock-hyprland` via `cargo install`:** the legacy symlink alias is a `make install` feature only — `cargo install` ships the `nwg-dock` binary alone. Update your autostart line to `nwg-dock …` (drop the `-hyprland` suffix).
+
+### `make install` — for source builds, distro packagers, and the legacy symlink
+
+The Makefile install path drops the binary, the bundled `style.css`, and the `nwg-dock-hyprland` legacy symlink. Three invocations depending on where the binary should land:
 
 **Default — system-wide (needs sudo):**
 
@@ -73,14 +86,6 @@ make install PREFIX=$HOME/.local BINDIR=$HOME/.cargo/bin
 ```bash
 sudo make install PREFIX=/usr
 ```
-
-### From crates.io
-
-```bash
-cargo install nwg-dock
-```
-
-`cargo install` only installs the `nwg-dock` binary in `~/.cargo/bin/`; the `nwg-dock-hyprland` symlink alias is a `make install` feature only. If you're migrating from `nwg-dock-hyprland` and using `cargo install`, update your autostart to `nwg-dock …`.
 
 ## Usage
 
