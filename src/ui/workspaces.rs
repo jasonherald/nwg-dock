@@ -202,8 +202,9 @@ mod tests {
 
     #[test]
     fn plan_negative_num_ws_returns_empty() {
-        // Defensive: clap default of 10 prevents this normally, but
-        // pure helper shouldn't panic on negatives.
+        // Defensive: the clap default in config.rs is positive so this
+        // is unreachable in practice, but the pure helper shouldn't
+        // panic on negatives if someone passes one directly.
         assert!(workspace_button_plan(-1, None).is_empty());
     }
 }
