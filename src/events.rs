@@ -8,15 +8,27 @@ use std::sync::mpsc;
 /// Checks for new events and triggers a rebuild if the client list changed.
 /// During drag, sets `rebuild_pending` instead of rebuilding immediately.
 /// After drag ends, the pending flag is checked and the rebuild fires.
+///
+/// Workspace-changed events bypass the client-list diff: switching workspaces
+/// doesn't change the client list, but the workspace switcher row needs to
+/// redraw with the new active button class. So if any workspace event drained,
+/// we force a rebuild (deferred during drag, like the client-list path).
 fn poll_and_rebuild(
     receiver: &mpsc::Receiver<String>,
+    workspace_receiver: &mpsc::Receiver<()>,
     state: &Rc<RefCell<DockState>>,
     rebuild_fn: &Rc<dyn Fn()>,
 ) {
     let dragging = state.borrow().drag_pending || state.borrow().drag_source_index.is_some();
-    if drain_new_events(receiver) && needs_rebuild(state) {
+    let workspace_changed = drain_workspace_events(workspace_receiver);
+    let client_changed = drain_new_events(receiver) && needs_rebuild(state);
+
+    if client_changed {
         // Cancel launch animations for apps that now have windows
         crate::ui::launch_bounce::cancel_matched(state);
+    }
+
+    if client_changed || workspace_changed {
         if dragging {
             state.borrow_mut().rebuild_pending = true;
         } else {
@@ -26,6 +38,15 @@ fn poll_and_rebuild(
         state.borrow_mut().rebuild_pending = false;
         rebuild_fn();
     }
+}
+
+/// Drains workspace-changed events and returns true if at least one arrived.
+fn drain_workspace_events(receiver: &mpsc::Receiver<()>) -> bool {
+    let mut changed = false;
+    while receiver.try_recv().is_ok() {
+        changed = true;
+    }
+    changed
 }
 
 /// Drains pending window-change events and returns true if at least one
@@ -96,6 +117,7 @@ pub fn start_event_listener(
     compositor: Rc<dyn Compositor>,
 ) {
     let (sender, receiver) = mpsc::channel::<String>();
+    let (ws_sender, ws_receiver) = mpsc::channel::<()>();
 
     // Create the event stream on the main thread, then move it to the background
     let mut stream = match compositor.event_stream() {
@@ -114,6 +136,12 @@ pub fn start_event_listener(
                         break;
                     }
                 }
+                Ok(WmEvent::WorkspaceChanged { .. }) => {
+                    log::debug!("Workspace changed; rebuilding dock");
+                    if ws_sender.send(()).is_err() {
+                        break;
+                    }
+                }
                 Ok(_) => {} // Other events ignored
                 Err(e) => {
                     log::error!("Compositor event stream error: {}", e);
@@ -124,7 +152,7 @@ pub fn start_event_listener(
     });
 
     glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        poll_and_rebuild(&receiver, &state, &rebuild_fn);
+        poll_and_rebuild(&receiver, &ws_receiver, &state, &rebuild_fn);
         glib::ControlFlow::Continue
     });
 }
