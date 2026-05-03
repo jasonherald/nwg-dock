@@ -1,0 +1,172 @@
+//! Workspace switcher widget. Pure plan-builder + thin GTK builder.
+//!
+//! See `docs/superpowers/specs/2026-04-29-workspace-switcher-design.md`
+//! in nwg-common for the full design. The split keeps unit tests free
+//! of GTK init: `workspace_button_plan` is pure data-in/data-out;
+//! `build_row` consumes the plan and emits widgets, tested via the
+//! integration harness.
+//!
+//! Note on `focused_workspace_id`: `nwg_common::compositor::Compositor`
+//! has no `list_workspaces()` method, and `WmWorkspace` has no
+//! `focused` flag. The focused workspace id is instead derived from
+//! the focused monitor's `active_workspace` — which is exactly how
+//! both the Hyprland and Sway backends already plumb workspace state.
+
+// `build_row`, `build_workspace_row`, and `focused_workspace_id` are
+// the public widget API; nothing calls them yet because B4 only
+// creates the module — wiring into `dock_box::build` lands in B5
+// (jasonherald/nwg-dock#4). Removed once B5 lands.
+#![allow(dead_code)]
+
+use crate::context::DockContext;
+use gtk4::prelude::*;
+use nwg_common::compositor::Compositor;
+use std::rc::Rc;
+
+/// One workspace button's render plan. Pure data — produced from the
+/// compositor's workspace list and rendered by `build_row` below.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceButton {
+    pub n: i32,
+    pub label: String,
+    pub is_active: bool,
+}
+
+/// Pure plan builder. Given the configured count and the currently-
+/// focused workspace id (None when no compositor or empty list),
+/// returns a vector of buttons to render.
+///
+/// Edge cases:
+/// - `num_ws <= 0` → empty vec (degenerate but valid; clap's default
+///   prevents non-positive values in practice but defensive).
+/// - `active_id == Some(n)` where `n > num_ws` → no button has
+///   `is_active == true` (user is on a workspace beyond the
+///   configured count; matches Go dock behavior).
+pub fn workspace_button_plan(num_ws: i32, active_id: Option<i32>) -> Vec<WorkspaceButton> {
+    if num_ws <= 0 {
+        return Vec::new();
+    }
+    (1..=num_ws)
+        .map(|n| WorkspaceButton {
+            n,
+            label: n.to_string(),
+            is_active: Some(n) == active_id,
+        })
+        .collect()
+}
+
+/// Looks up the focused workspace id from the compositor by finding
+/// the focused monitor and returning its `active_workspace.id`.
+///
+/// Returns `None` if the compositor query fails (NullCompositor, IPC
+/// error, etc.) or no monitor is marked focused.
+pub fn focused_workspace_id(compositor: &dyn Compositor) -> Option<i32> {
+    compositor
+        .list_monitors()
+        .ok()?
+        .into_iter()
+        .find(|m| m.focused)
+        .map(|m| m.active_workspace.id)
+}
+
+/// Builds the workspace switcher row from a render plan. Inserts each
+/// button into a `gtk4::Box` matching the dock's orientation, attaches
+/// click handlers that call `compositor.focus_workspace(n)`.
+///
+/// Caller is responsible for inserting the returned `Box` into the
+/// dock layout (see `dock_box::build` integration). On NullCompositor
+/// or empty workspace list, the plan is empty and the returned Box
+/// has zero children.
+pub fn build_row(
+    plan: &[WorkspaceButton],
+    orient: gtk4::Orientation,
+    compositor: &Rc<dyn Compositor>,
+) -> gtk4::Box {
+    let row = gtk4::Box::new(orient, 0);
+    row.add_css_class("dock-workspace-row");
+    for btn_plan in plan {
+        let btn = gtk4::Button::with_label(&btn_plan.label);
+        btn.add_css_class("dock-workspace-button");
+        if btn_plan.is_active {
+            btn.add_css_class("dock-workspace-active");
+        }
+        let compositor = Rc::clone(compositor);
+        let n = btn_plan.n;
+        btn.connect_clicked(move |_| {
+            if let Err(e) = compositor.focus_workspace(n) {
+                log::warn!("Failed to focus workspace {}: {}", n, e);
+            }
+        });
+        row.append(&btn);
+    }
+    row
+}
+
+/// Convenience entry point: queries the compositor for the focused
+/// workspace, builds the plan, builds the row. Used by `dock_box::build`.
+pub fn build_workspace_row(ctx: &DockContext) -> gtk4::Box {
+    let active = focused_workspace_id(ctx.compositor.as_ref());
+    let plan = workspace_button_plan(ctx.config.num_ws, active);
+    let orient = if ctx.config.is_vertical() {
+        gtk4::Orientation::Vertical
+    } else {
+        gtk4::Orientation::Horizontal
+    };
+    build_row(&plan, orient, &ctx.compositor)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plan_returns_num_ws_buttons() {
+        let plan = workspace_button_plan(5, None);
+        assert_eq!(plan.len(), 5);
+        for (i, btn) in plan.iter().enumerate() {
+            assert_eq!(btn.n, (i + 1) as i32);
+            assert_eq!(btn.label, (i + 1).to_string());
+            assert!(!btn.is_active);
+        }
+    }
+
+    #[test]
+    fn plan_marks_active_workspace() {
+        let plan = workspace_button_plan(5, Some(3));
+        assert_eq!(plan.len(), 5);
+        for btn in &plan {
+            if btn.n == 3 {
+                assert!(btn.is_active, "workspace 3 should be marked active");
+            } else {
+                assert!(
+                    !btn.is_active,
+                    "workspace {} should NOT be marked active",
+                    btn.n
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn plan_zero_num_ws_returns_empty() {
+        assert!(workspace_button_plan(0, None).is_empty());
+        assert!(workspace_button_plan(0, Some(1)).is_empty());
+    }
+
+    #[test]
+    fn plan_active_outside_range_marks_none_active() {
+        let plan = workspace_button_plan(10, Some(11));
+        assert_eq!(plan.len(), 10);
+        assert!(
+            plan.iter().all(|b| !b.is_active),
+            "no button should be active when active_id > num_ws"
+        );
+    }
+
+    #[test]
+    fn plan_negative_num_ws_returns_empty() {
+        // Defensive: clap default of 10 prevents this normally, but
+        // pure helper shouldn't panic on negatives.
+        assert!(workspace_button_plan(-1, None).is_empty());
+    }
+}
