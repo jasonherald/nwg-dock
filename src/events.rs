@@ -5,6 +5,11 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::mpsc;
 
+/// Main-thread polling cadence (ms) for draining events from the
+/// background compositor-event thread. 100 ms keeps the dock visually
+/// reactive (sub-frame on 60 Hz at worst) without burning idle CPU.
+const EVENT_POLL_INTERVAL_MS: u64 = 100;
+
 /// Checks for new events and triggers a rebuild if the client list changed.
 /// During drag, sets `rebuild_pending` instead of rebuilding immediately.
 /// After drag ends, the pending flag is checked and the rebuild fires.
@@ -151,10 +156,13 @@ pub fn start_event_listener(
         }
     });
 
-    glib::timeout_add_local(std::time::Duration::from_millis(100), move || {
-        poll_and_rebuild(&receiver, &ws_receiver, &state, &rebuild_fn);
-        glib::ControlFlow::Continue
-    });
+    glib::timeout_add_local(
+        std::time::Duration::from_millis(EVENT_POLL_INTERVAL_MS),
+        move || {
+            poll_and_rebuild(&receiver, &ws_receiver, &state, &rebuild_fn);
+            glib::ControlFlow::Continue
+        },
+    );
 }
 
 #[cfg(test)]

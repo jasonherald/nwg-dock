@@ -15,7 +15,9 @@
 //! monitor by output connector name so multi-monitor setups show the
 //! correct active button on each screen.
 
+use crate::config::Position;
 use crate::context::DockContext;
+use crate::ui::constants::{INDICATOR_DIVISOR, WORKSPACE_ROW_SPACING};
 use gtk4::prelude::*;
 use nwg_common::compositor::Compositor;
 use std::rc::Rc;
@@ -63,9 +65,18 @@ pub fn active_workspace_for_monitor(
     compositor: &dyn Compositor,
     monitor_name: &str,
 ) -> Option<i32> {
-    compositor
-        .list_monitors()
-        .ok()?
+    let monitors = match compositor.list_monitors() {
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!(
+                "Failed to query monitors for workspace switcher (monitor='{}'): {}",
+                monitor_name,
+                e
+            );
+            return None;
+        }
+    };
+    monitors
         .into_iter()
         .find(|mon| mon.name == monitor_name)
         .map(|mon| mon.active_workspace.id)
@@ -84,7 +95,7 @@ pub fn build_row(
     orient: gtk4::Orientation,
     compositor: &Rc<dyn Compositor>,
 ) -> gtk4::Box {
-    let row = gtk4::Box::new(orient, 0);
+    let row = gtk4::Box::new(orient, WORKSPACE_ROW_SPACING);
     row.add_css_class("dock-workspace-row");
     for btn_plan in plan {
         let btn = gtk4::Button::with_label(&btn_plan.label);
@@ -105,8 +116,13 @@ pub fn build_row(
 }
 
 /// Convenience entry point: queries the compositor for the focused
-/// workspace ON THE GIVEN MONITOR, builds the plan, builds the row.
-/// Used by `dock_box::build`.
+/// workspace ON THE GIVEN MONITOR, builds the plan, builds the row,
+/// and applies a Position-aware margin so the pills line up with icon
+/// centers (the running-app indicator under each icon biases the icon
+/// button's visual center off the row centerline by `icon_size /
+/// INDICATOR_DIVISOR / 2` toward the dock's outer edge — we cancel
+/// that bias by adding the same number of pixels of margin to the
+/// workspace row on the SAME side as the dock's `position`).
 pub fn build_workspace_row(ctx: &DockContext, monitor_name: &str) -> gtk4::Box {
     let active = active_workspace_for_monitor(ctx.compositor.as_ref(), monitor_name);
     let plan = workspace_button_plan(ctx.config.num_ws, active);
@@ -115,7 +131,25 @@ pub fn build_workspace_row(ctx: &DockContext, monitor_name: &str) -> gtk4::Box {
     } else {
         gtk4::Orientation::Horizontal
     };
-    build_row(&plan, orient, &ctx.compositor)
+    let row = build_row(&plan, orient, &ctx.compositor);
+    apply_position_offset(&row, ctx.config.position, ctx.config.icon_size);
+    row
+}
+
+/// Adds a margin on the dock's outer edge equal to the running-app
+/// indicator height (`icon_size / INDICATOR_DIVISOR`). Pulls the
+/// workspace row's content toward the dock's INNER edge to align with
+/// icon centers, since the indicator below each icon (Bottom dock) /
+/// above (Top) / beside (Left, Right) shifts the icon button's
+/// effective visual center inward by that amount.
+fn apply_position_offset(row: &gtk4::Box, position: Position, icon_size: i32) {
+    let offset = icon_size / INDICATOR_DIVISOR;
+    match position {
+        Position::Bottom => row.set_margin_bottom(offset),
+        Position::Top => row.set_margin_top(offset),
+        Position::Left => row.set_margin_start(offset),
+        Position::Right => row.set_margin_end(offset),
+    }
 }
 
 #[cfg(test)]

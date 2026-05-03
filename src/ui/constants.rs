@@ -31,3 +31,18 @@ pub const LAUNCH_BOUNCE_DIP_PX: i32 = 4;
 
 /// Duration of one full bounce cycle in milliseconds.
 pub const LAUNCH_BOUNCE_DURATION_MS: i32 = 600;
+
+/// Pixels of padding between workspace switcher buttons inside the row.
+/// 0 = pills sit flush against each other and let their own margin/padding
+/// (set in `ui/css.rs`'s `.dock-workspace-button` rule) handle spacing.
+/// Centralizing the literal here keeps button geometry tweakable from
+/// one file instead of being hidden inside a `Box::new()` call.
+pub const WORKSPACE_ROW_SPACING: i32 = 0;
+
+/// Indicator height as a fraction of icon size (img_size / 8). Used by
+/// `ui/buttons.rs` to size the running-app indicator under each icon
+/// AND by the workspace switcher to compensate vertical alignment so
+/// workspace pills line up with icon centers (the indicator under each
+/// icon biases the icon button's visual center). See
+/// `ui/workspaces.rs::build_workspace_row` for the per-Position margin.
+pub const INDICATOR_DIVISOR: i32 = 8;
