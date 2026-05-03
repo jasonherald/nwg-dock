@@ -21,6 +21,7 @@ Ported from [nwg-piotr/nwg-dock-hyprland](https://github.com/nwg-piotr/nwg-dock-
 - **Configurable opacity** — `--opacity 0-100` for translucent or opaque dock
 - **Right-click menus** — pin/unpin, close, toggle floating, fullscreen, move to workspace
 - **Launch animation** — optional bounce animation on dock icons while an app is starting (`--launch-animation`)
+- **Workspace switcher** — optional pill-button row between pinned and tasks for jumping workspaces (`--ws`, default off)
 - **Middle-click** — launch new instance of any running app
 - **Monitor hotplug** — dock windows reconcile automatically when monitors are added/removed
 - **Rotated/scaled monitors** — cursor tracking works correctly with portrait and scaled displays
@@ -35,7 +36,7 @@ Ported from [nwg-piotr/nwg-dock-hyprland](https://github.com/nwg-piotr/nwg-dock-
 
 - **Rust 1.95** or later (pinned in `rust-toolchain.toml`; rustup picks it up automatically)
 - **GTK4** and **gtk4-layer-shell** system libraries
-- A supported compositor: **Hyprland** or **Sway**
+- A supported compositor: **Hyprland** or **Sway** — on other Wayland compositors (Niri, river, etc.) the dock starts in degraded mode: pinned apps still render and click-to-launch still works, but live features (auto-hide, workspace switcher, event-driven rebuilds) are disabled. A warning logs to stderr/journal so you know you're running degraded.
 
 ### Install system dependencies
 
