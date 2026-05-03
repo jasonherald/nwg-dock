@@ -345,7 +345,7 @@ Filed as one issue under `testability` (rather than splitting between testabilit
 
 ### Category: magic-numbers
 
-#### CR-2026-05-03-22 [magic-numbers] Hotspot CSS background literal `rgba(0,0,0,0.01)` is duplicated of intent
+#### CR-2026-05-03-22 [magic-numbers] Hotspot CSS background literal `rgba(0,0,0,0.01)` is an unexplained load-bearing literal
 
 **Severity:** nit
 **Files:** `src/ui/hotspot/hotspot_windows.rs:161`
