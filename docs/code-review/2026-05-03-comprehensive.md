@@ -13,11 +13,11 @@ The codebase is already in genuinely good shape — standard `cargo clippy` is c
 | error-handling | 0 | 1 | 1 | 2 |
 | naming-and-comments | 0 | 0 | 3 | 3 |
 | architecture | 0 | 2 | 1 | 3 |
-| concurrency | 0 | 1 | 1 | 2 |
+| concurrency | 0 | 0 | 2 | 2 |
 | testability | 0 | 1 | 0 | 1 |
 | dead-code-magic-numbers | 0 | 0 | 1 | 1 |
 | documentation | 0 | 1 | 1 | 2 |
-| **Total** | **0** | **10** | **14** | **24** |
+| **Total** | **0** | **9** | **15** | **24** |
 
 ## Findings
 
@@ -154,10 +154,10 @@ pub fn start_event_listener(
 )
 ```
 
-`compositor` is taken by value but only used to call `compositor.event_stream()` once — it isn't moved into the spawned thread. Same callsite in `main.rs` does `Rc::clone(&params.compositor)` to satisfy the by-value signature. Either `compositor` should be `&Rc<dyn Compositor>` (consistent with the other listener setup functions in `listeners.rs`, all of which take by-ref), or it should genuinely be moved into the closure. The current shape forces an unnecessary clone at the call site without conveying ownership transfer.
+`compositor` is taken by value but only used to call `compositor.event_stream()` once — it isn't moved into the spawned thread. The callsite in `main.rs` does `Rc::clone(&params.compositor)` to satisfy the by-value signature. The current shape forces an unnecessary clone at the call site without conveying ownership transfer.
 
 **Proposed fix:**
-Take `compositor: &Rc<dyn Compositor>`. Drop the clone in `main.rs:213`. (`state` and `rebuild_fn` ARE moved into the timer closure, so they correctly take by value.)
+Take `compositor: &dyn Compositor` — minimum borrow that the function actually needs, and the idiomatic Rust API shape (the Rust API Guidelines recommend `&dyn Trait` over `&Rc<dyn Trait>` when the callee only needs to call methods, not retain ownership). Drop the clone in `main.rs:213`; the call becomes `start_event_listener(state, rebuild_fn, params.compositor.as_ref())`. (`state` and `rebuild_fn` ARE moved into the timer closure, so they correctly take by value.)
 
 ### Category: error-handling
 
@@ -280,7 +280,7 @@ Extract `spawn_event_thread(stream, sender, ws_sender) -> JoinHandle` (currently
 
 #### CR-2026-05-03-19 [concurrency] `Rc<RefCell<DockState>>` is borrowed in nearly every UI handler — borrow audit needed
 
-**Severity:** important
+**Severity:** nit
 **Files:** Cross-cutting; particularly `src/ui/dock_box.rs:126-181`, `src/ui/launch_bounce.rs:11-40`, `src/ui/buttons.rs:108-167`, `src/ui/hotspot/cursor_poller.rs:62-115`, `src/events.rs:27-44`, `src/ui/drag.rs` (~30 borrow sites)
 
 **Why this matters:**
@@ -321,14 +321,14 @@ fn scale_icon_size(item_count: usize, config: &DockConfig) -> i32 {
 }
 ```
 
-This is a pure data-in/data-out helper — exactly the kind of code unit tests catch regressions on. It also has unexplained magic numbers (`6`, `3`) and a non-obvious algebraic identity (the first branch's `< config.icon_size` reduces to `count > 6`). CLAUDE.md says: "every numeric literal has a named constant or clear inline comment." A misreading of the intended formula ("scaling kicks in past 6 items, every additional 3 items shrinks the icon by ~icon_size/9") against the actual implementation isn't catchable today. Existing tests in this file cover none of `collect_all_items`, `is_class_represented`, `is_child_window_grouped`, `should_skip_running`, or `scale_icon_size` — all of which are pure helpers extracted from the builder.
+This is a pure data-in/data-out helper — exactly the kind of code unit tests catch regressions on. It also has unexplained magic numbers (`6`, `3`) and two non-obvious behaviors that make a misread plausible: (1) the first branch's `< config.icon_size` reduces to `count > 6`, and (2) integer-division on `(item_count - 6) / 3` creates a plateau at items 7-8 where the branch is taken but `overflow == 0`, so the result is still full size — the *first actual visual scale step* doesn't kick in until 9 items (verified for `icon_size=48`: items=8 → 48, items=9 → 41, items=12 → 36, items=15 → 32). CLAUDE.md says: "every numeric literal has a named constant or clear inline comment." A misreading of the intended formula against this two-stage behavior isn't catchable today. Existing tests in this file cover none of `collect_all_items`, `is_class_represented`, `is_child_window_grouped`, `should_skip_running`, or `scale_icon_size` — all of which are pure helpers extracted from the builder.
 
 **Proposed fix:**
 
 Single PR with two acceptance criteria:
 
-1. **Constants + formula comment.** Add `const SCALE_THRESHOLD_ITEMS: i32 = 6;` and `const SCALE_STEP_ITEMS: i32 = 3;` (local to `dock_box.rs` is fine, or `ui/constants.rs`). Reference them inside `scale_icon_size`. Add a one-line comment explaining the formula.
-2. **Unit tests.** Cover `scale_icon_size` at 1 item (returns full size), 6 items (boundary, full size), 7 items (first scale step), 12 items (second step), 100 items (asymptote sanity). Add similar small tests for the other pure helpers in `dock_box.rs` (`collect_all_items`, `is_class_represented`, `is_child_window_grouped`, `should_skip_running`) — 5-15 lines of branchy logic each, concrete coverage rather than coverage-theater.
+1. **Constants + formula comment.** Add `const SCALE_THRESHOLD_ITEMS: i32 = 6;` and `const SCALE_STEP_ITEMS: i32 = 3;` (local to `dock_box.rs` is fine, or `ui/constants.rs`). Reference them inside `scale_icon_size`. Add a comment explaining the formula AND the integer-division plateau (so a reader sees that items 7-8 still return full size by design rather than mistaking it for a bug).
+2. **Unit tests.** Cover `scale_icon_size` at: 1 item (returns full size), 6 items (boundary, full size), 8 items (plateau — branch taken but overflow=0, still full size — pin this so refactors don't accidentally change the boundary), 9 items (first actual scale step, drops below full size), 12 items (next step), 100 items (asymptote sanity). Add similar small tests for the other pure helpers in `dock_box.rs` (`collect_all_items`, `is_class_represented`, `is_child_window_grouped`, `should_skip_running`) — 5-15 lines of branchy logic each, concrete coverage rather than coverage-theater.
 
 Filed as one issue under `testability` (rather than splitting between testability and magic-numbers) because the work is one PR and the two criteria reinforce each other — the constants make the tests easier to write against named boundaries, and the tests pin the formula the constants document.
 
