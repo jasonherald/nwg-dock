@@ -96,6 +96,9 @@ nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75
 # With launch animation and drawer integration
 nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c "nwg-drawer --pb-auto"
 
+# With workspace switcher row (between pinned and tasks)
+nwg-dock -d -i 48 --mb 10 --ws --num-ws 5
+
 # Force Sway backend (auto-detection is usually enough)
 nwg-dock --wm sway
 ```
@@ -215,6 +218,12 @@ Three CSS layers are stacked, highest priority last:
 2. **Programmatic overrides** — `--opacity` and bounce animation keyframes
 3. **Your CSS file** — always wins
 
+Selected classes available for overriding:
+
+- `.dock-workspace-row` — container for the workspace button row (when `--ws` is set)
+- `.dock-workspace-button` — individual workspace button
+- `.dock-workspace-active` — class added to the currently-focused workspace's button
+
 ### base16 themes via tinty
 
 [tinty](https://github.com/tinted-theming/tinty) + [tinted-nwg-dock](https://github.com/tinted-theming/tinted-nwg-dock) templates retheme the dock live. See the tinted-nwg-dock README for setup; apply a theme with:
@@ -251,6 +260,7 @@ User-visible PRs add a CHANGELOG bullet under `## [x.y.z] — Unreleased` in `CH
 - **Drag-to-reorder** — new feature not in the Go dock.
 - **CLI flag naming** — multi-word flags standardized to kebab-case. Multi-char Go short forms (`-hd`, `-iw`, `-is`) not available; use the long forms.
 - **Fuzzy class matching** — desktop file `github-desktop` vs compositor class `github desktop` are matched automatically.
+- **Workspace switcher defaults OFF.** The Go dock shows the workspace button row by default and provides `-nows` to hide it; we default the row OFF and provide `--ws` to enable. Existing dock users updating across this version line see no UI change unless they opt in.
 
 ## Credits
 
