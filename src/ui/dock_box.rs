@@ -101,6 +101,7 @@ pub fn build(
     alignment_box: &gtk4::Box,
     ctx: &DockContext,
     win: &gtk4::ApplicationWindow,
+    monitor_name: &str,
 ) -> gtk4::Box {
     let config = &ctx.config;
     let inner_orientation = if config.is_vertical() {
@@ -165,7 +166,7 @@ pub fn build(
     );
 
     if ctx.config.ws {
-        let workspaces_row = crate::ui::workspaces::build_workspace_row(ctx);
+        let workspaces_row = crate::ui::workspaces::build_workspace_row(ctx, monitor_name);
         main_box.append(&workspaces_row);
     }
 

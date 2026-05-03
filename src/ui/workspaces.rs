@@ -6,11 +6,14 @@
 //! `build_row` consumes the plan and emits widgets, tested via the
 //! integration harness.
 //!
-//! Note on `focused_workspace_id`: `nwg_common::compositor::Compositor`
+//! Note on `active_workspace_for_monitor`: `nwg_common::compositor::Compositor`
 //! has no `list_workspaces()` method, and `WmWorkspace` has no
-//! `focused` flag. The focused workspace id is instead derived from
-//! the focused monitor's `active_workspace` — which is exactly how
-//! both the Hyprland and Sway backends already plumb workspace state.
+//! `focused` flag. The active workspace id is instead derived per
+//! monitor from each `WmMonitor`'s `active_workspace` — which is
+//! exactly how both the Hyprland and Sway backends already plumb
+//! workspace state. Each per-monitor dock instance queries its OWN
+//! monitor by output connector name so multi-monitor setups show the
+//! correct active button on each screen.
 
 use crate::context::DockContext;
 use gtk4::prelude::*;
@@ -49,18 +52,23 @@ pub fn workspace_button_plan(num_ws: i32, active_id: Option<i32>) -> Vec<Workspa
         .collect()
 }
 
-/// Looks up the focused workspace id from the compositor by finding
-/// the focused monitor and returning its `active_workspace.id`.
-///
-/// Returns `None` if the compositor query fails (NullCompositor, IPC
-/// error, etc.) or no monitor is marked focused.
-pub fn focused_workspace_id(compositor: &dyn Compositor) -> Option<i32> {
+/// Returns the id of the workspace currently active on the named
+/// monitor, or `None` if the compositor query fails or the monitor
+/// isn't in the list. The caller is the per-monitor dock instance —
+/// each dock window queries its own monitor's active workspace, so
+/// the workspace switcher shows different "active" buttons on
+/// different monitors on multi-monitor setups (matches what's
+/// physically visible to the user on each screen).
+pub fn active_workspace_for_monitor(
+    compositor: &dyn Compositor,
+    monitor_name: &str,
+) -> Option<i32> {
     compositor
         .list_monitors()
         .ok()?
         .into_iter()
-        .find(|m| m.focused)
-        .map(|m| m.active_workspace.id)
+        .find(|mon| mon.name == monitor_name)
+        .map(|mon| mon.active_workspace.id)
 }
 
 /// Builds the workspace switcher row from a render plan. Inserts each
@@ -97,9 +105,10 @@ pub fn build_row(
 }
 
 /// Convenience entry point: queries the compositor for the focused
-/// workspace, builds the plan, builds the row. Used by `dock_box::build`.
-pub fn build_workspace_row(ctx: &DockContext) -> gtk4::Box {
-    let active = focused_workspace_id(ctx.compositor.as_ref());
+/// workspace ON THE GIVEN MONITOR, builds the plan, builds the row.
+/// Used by `dock_box::build`.
+pub fn build_workspace_row(ctx: &DockContext, monitor_name: &str) -> gtk4::Box {
+    let active = active_workspace_for_monitor(ctx.compositor.as_ref(), monitor_name);
     let plan = workspace_button_plan(ctx.config.num_ws, active);
     let orient = if ctx.config.is_vertical() {
         gtk4::Orientation::Vertical
