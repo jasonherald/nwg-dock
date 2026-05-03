@@ -140,7 +140,7 @@ pub struct DockConfig {
     pub nolauncher: bool,
 
     /// Number of workspaces you use
-    #[arg(short = 'w', long, default_value_t = 10)]
+    #[arg(short = 'w', long, default_value_t = 5)]
     pub num_ws: i32,
 
     /// Position on screen edge
