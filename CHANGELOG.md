@@ -12,6 +12,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > preserved in the monorepo's git log; this file only documents changes from
 > v0.3.0 onward.
 
+## [Unreleased]
+
+### Added
+
+- Workspace switcher widget (#4). Optional row of workspace buttons
+  between pinned and tasks rows. Click switches the focused workspace
+  via the new `Compositor::focus_workspace`. Active workspace gets
+  `.dock-workspace-active` CSS class for visual distinction. New
+  `--ws` flag enables the row (default off — diverges from Go dock,
+  see README "Deviations from Go nwg-dock-hyprland").
+- Reactive refresh: dock rebuilds on `WmEvent::WorkspaceChanged`, so
+  switching workspaces via keybind or another tool updates the
+  widget within a frame. Per-monitor: each dock instance queries its
+  own monitor's active workspace, so multi-monitor setups show the
+  correct active button on each screen rather than mirroring the
+  keyboard-focused monitor's.
+- CSS classes shipped in the embedded compat CSS:
+  `.dock-workspace-row`, `.dock-workspace-button`,
+  `.dock-workspace-active`. Documented in the README's Theming
+  section.
+
+### Changed
+
+- Cold start now uses `nwg_common::compositor::init_or_null` instead
+  of `init_or_exit`. The dock survives on unsupported compositors
+  (Niri, river, Openbox) instead of `exit(1)`. Pinned apps still
+  render and click-to-launch still works; live features (event
+  reactions, autohide, workspace switcher) silently disappear. The
+  warning log lives in `nwg-common` itself so users know they're
+  running degraded.
+- Bumped `nwg-common` dep to `0.4.0` for `WmEvent::WorkspaceChanged`
+  and `Compositor::focus_workspace`.
+
 ## [0.3.1] — 2026-04-28
 
 ### Added

@@ -140,7 +140,7 @@ pub struct DockConfig {
     pub nolauncher: bool,
 
     /// Number of workspaces you use
-    #[arg(short = 'w', long, default_value_t = 10)]
+    #[arg(short = 'w', long, default_value_t = 5)]
     pub num_ws: i32,
 
     /// Position on screen edge
@@ -166,6 +166,14 @@ pub struct DockConfig {
     /// Show a bounce animation on dock icons while an app is launching
     #[arg(long)]
     pub launch_animation: bool,
+
+    /// Show the workspace switcher row between pinned and tasks.
+    /// Default off; opt-in via `--ws`. The Go nwg-dock defaults this
+    /// row ON; we keep existing nwg-dock users' layout unchanged
+    /// unless they explicitly enable it. See README "Deviations from
+    /// Go nwg-dock" for the rationale.
+    #[arg(long)]
+    pub ws: bool,
 
     /// Disable fullscreen suppression (allow dock hotspot on fullscreen monitors)
     #[arg(long)]
@@ -420,6 +428,18 @@ mod tests {
     fn print_config_flag_on() {
         let cfg = DockConfig::parse_from(["test", "--print-config"]);
         assert!(cfg.print_config);
+    }
+
+    #[test]
+    fn ws_flag_default_off() {
+        let cfg = DockConfig::parse_from(["test"]);
+        assert!(!cfg.ws);
+    }
+
+    #[test]
+    fn ws_flag_on() {
+        let cfg = DockConfig::parse_from(["test", "--ws"]);
+        assert!(cfg.ws);
     }
 
     #[test]

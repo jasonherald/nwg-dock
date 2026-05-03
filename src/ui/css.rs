@@ -51,6 +51,36 @@ window {{
 .drag-remove-icon {{
     color: #e06c75;
 }}
+
+/* Workspace switcher row + buttons (--ws flag).
+   Pill-shaped, subtle inactive state, brighter active.
+   Sized to feel proportional next to dock icons without competing
+   with them. Override via style.css if you want a different look. */
+.dock-workspace-row {{
+    margin: 0 4px;
+    padding: 0;
+}}
+.dock-workspace-button {{
+    min-width: 28px;
+    min-height: 28px;
+    margin: 4px 2px;
+    padding: 0 8px;
+    border-radius: 14px;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.65);
+    font-weight: 500;
+    font-size: 12px;
+    border: none;
+    box-shadow: none;
+}}
+.dock-workspace-button:hover {{
+    background-color: rgba(255, 255, 255, 0.18);
+    color: rgba(255, 255, 255, 0.95);
+}}
+.dock-workspace-active {{
+    background-color: rgba(255, 255, 255, 0.3);
+    color: rgba(255, 255, 255, 1.0);
+}}
 "#,
         a = DEFAULT_BG_ALPHA,
     )

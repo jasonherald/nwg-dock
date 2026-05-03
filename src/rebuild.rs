@@ -113,7 +113,7 @@ fn rebuild_one_dock(dock: &MonitorDock, ctx: &DockContext) {
     }
     dock.current_main_box.borrow_mut().take();
 
-    let new_box = ui::dock_box::build(&dock.alignment_box, ctx, &dock.win);
+    let new_box = ui::dock_box::build(&dock.alignment_box, ctx, &dock.win, &dock.output_name);
     let new_count = count_children(&new_box);
     *dock.current_main_box.borrow_mut() = Some(new_box);
 

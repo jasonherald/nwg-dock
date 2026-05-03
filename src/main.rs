@@ -96,7 +96,7 @@ fn main() {
 
     auto_detect_launcher(&mut config);
     let compositor: Rc<dyn nwg_common::compositor::Compositor> =
-        Rc::from(nwg_common::compositor::init_or_exit(config.wm));
+        Rc::from(nwg_common::compositor::init_or_null(config.wm));
     let _lock = acquire_singleton_lock("mac-dock", config.multi, config.is_resident_mode());
 
     let data_home = paths::find_data_home("nwg-dock-hyprland").unwrap_or_else(|| {

@@ -15,8 +15,8 @@ name = "nwg-dock"
 path = "src/main.rs"
 
 [dependencies]
-# Shared library (library + binaries all on the 0.3.x line)
-nwg-common = "0.3"
+# Shared library (library + binaries all on the 0.4.x line)
+nwg-common = "0.4"
 
 # GTK4 + Wayland layer shell
 gtk4 = "0.10"
