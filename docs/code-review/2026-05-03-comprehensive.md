@@ -2,22 +2,24 @@
 
 Post-0.4.0 refinement pass. Goal: clean up the codebase to match the polish of the app itself. Each finding below maps to a single GH issue and carries a stable ID of the form `CR-2026-05-03-NN` so issue conversion is deterministic and titles can evolve without breaking cross-references.
 
+**Fix-shape convention:** when a finding's proposed fix admits more than one approach, the doc commits to one as **Issue scope (required now)** — that's the locked acceptance criterion the child issue carries — and lists any alternative as **Alternative considered (optional)** — documented but not part of the issue's done-when. This keeps "one finding = one issue" deterministic when scripting issue creation.
+
 The codebase is already in genuinely good shape — standard `cargo clippy` is clean, the architecture is coherent, conventions from CLAUDE.md (enum-over-string, named constants, `DockContext` instead of N-ref signatures) are honored almost everywhere. Most findings here are nits and minor idiom polish. The few "important" items are real architectural smells worth addressing before they grow.
 
 ## Summary
 
 | Category | Critical | Important | Nit | Total |
 |---|---|---|---|---|
-| rust-idioms | 0 | 1 | 5 | 6 |
+| rust-idioms | 0 | 0 | 6 | 6 |
 | api-hygiene | 0 | 3 | 1 | 4 |
 | error-handling | 0 | 1 | 1 | 2 |
 | naming-and-comments | 0 | 0 | 3 | 3 |
 | architecture | 0 | 2 | 1 | 3 |
 | concurrency | 0 | 0 | 2 | 2 |
 | testability | 0 | 1 | 0 | 1 |
-| dead-code-magic-numbers | 0 | 0 | 1 | 1 |
+| magic-numbers | 0 | 0 | 1 | 1 |
 | documentation | 0 | 1 | 1 | 2 |
-| **Total** | **0** | **9** | **15** | **24** |
+| **Total** | **0** | **8** | **16** | **24** |
 
 ## Findings
 
@@ -88,7 +90,7 @@ Rewrite the final `match` as `let Some((dock_x, dock_y)) = widget.translate_coor
 
 #### CR-2026-05-03-06 [rust-idioms] `wm_class_to_desktop_id` mutates redundant case-folded copies
 
-**Severity:** important
+**Severity:** nit
 **Files:** `src/main.rs:389-391`, used in `src/state.rs:112-116`, `src/ui/dock_box.rs:67-73`, `src/ui/launch_bounce.rs:78-83`
 
 **Why this matters:**
@@ -137,7 +139,10 @@ Two surgical refactors that don't redesign the type: (1) introduce `fn DockState
 Both bundle the same idea ("everything the rebuild path needs") but `ActivateParams` is a one-shot startup record that holds 8 fields, while `DockContext` is the recurring rebuild context with 6. They share `config`, `state`/`pinned_file`/`data_home`/`compositor` semantically, and the only reason they're separate is that `ActivateParams` was added later for `connect_activate`. The doc comment on `ActivateParams` even calls out the duplication ("Distinct from `DockContext` (which covers the rebuild path's narrower needs).") — that's the documentation acknowledging the smell rather than fixing it. A reader has to keep two mental models for "the dock's shared bag of refs."
 
 **Proposed fix:**
-Either: (a) rename `ActivateParams` to `DockBootstrap` and document the lifecycle distinction explicitly (startup-only vs. rebuild-recurring), or (b) absorb `ActivateParams`'s extra fields (`css_path`, `matches`, `app_dirs`, `sig_rx`) into a single `DockBootstrap` struct that owns `DockContext` as a sub-struct, so the rebuild path takes `&bootstrap.context` and the startup path takes `&bootstrap`. (b) is the cleaner long-term shape but (a) is the minimal-touch fix.
+
+**Issue scope (required now):** rename `ActivateParams` to `DockBootstrap` and document the lifecycle distinction explicitly (startup-only vs. rebuild-recurring) in the type's doc comment. Drops the "one struct acknowledging the smell of the other" tone in the current docstring without rearranging field ownership.
+
+**Alternative considered (optional):** absorb `ActivateParams`'s extra fields (`css_path`, `matches`, `app_dirs`, `sig_rx`) into a single `DockBootstrap` struct that owns `DockContext` as a sub-struct, so the rebuild path takes `&bootstrap.context` and the startup path takes `&bootstrap`. Cleaner long-term shape, larger blast radius — file as a follow-up if there's appetite after the rename lands.
 
 #### CR-2026-05-03-10 [api-hygiene] `clippy::needless_pass_by_value` on `start_event_listener`
 
@@ -190,7 +195,10 @@ let _provider = nwg_common::config::css::load_css(&new_css_path);
 The comment correctly explains WHY we discard the provider. But the `let _provider` binding pattern is the same syntax we'd use to silence a `Result`-discard warning, which makes a casual reader wonder if this is a swallowed error. Compare with `config_file.rs:864`'s `let _ = &watcher;` which has a similar comment but is genuinely a no-op for `move` semantics — distinct intents using the same syntax.
 
 **Proposed fix:**
-Either rename to `let _unused_provider` to signal "intentionally ignored value, not a Result", or just drop the binding and call `nwg_common::config::css::load_css(&new_css_path);` as a statement — the comment already explains it. Consistent treatment with other "don't care about return value" sites in the codebase.
+
+**Issue scope (required now):** drop the binding and call `nwg_common::config::css::load_css(&new_css_path);` as a statement — the existing comment already explains the discarded provider, no special name needed. Matches how other "don't care about return value" sites are handled in the codebase.
+
+**Alternative considered (optional):** rename to `let _unused_provider` to keep the binding but signal intent. Rejected because adding a placeholder name when the comment already explains the situation is just noise.
 
 ### Category: naming-and-comments
 
@@ -298,7 +306,10 @@ Audit-only finding — no immediate refactor, but worth making the implicit patt
 The pin-file watcher spawns a thread, sets up a `notify::recommended_watcher` whose closure captures the sender, calls `watcher.watch(...)`, then `std::thread::park()`s the thread forever. The comment says "Block forever — watcher stops if thread exits" — but `park()` never returns, so the thread NEVER exits, and the watcher's drop never runs. That's actually fine in practice (the dock binary lives as long as the watcher needs to), but the comment's claim "watcher stops if thread exits" implies a teardown story that doesn't exist. Compare with `config_file::watch_config_file` which keeps the watcher alive on the GLib main loop instead of in a parked thread — the same job done with one fewer OS thread.
 
 **Proposed fix:**
-Either (a) update the comment to "Watcher lives until process exit; thread parked to keep the closure's tx alive" — clarifies the actual lifecycle, or (b) restructure to match `watch_config_file`'s GLib-main-loop pattern. (a) is the minimum fix; (b) is the principled fix and saves a thread.
+
+**Issue scope (required now):** update the comment to "Watcher lives until process exit; thread parked to keep the closure's tx alive" — clarifies the actual lifecycle and stops the comment from implying a teardown story that doesn't exist. One-line PR.
+
+**Alternative considered (optional):** restructure to match `watch_config_file`'s GLib-main-loop pattern. Saves an OS thread and removes the parked-forever pattern entirely. File as a follow-up if the codebase later acquires more notify watchers and the inconsistency starts to bite.
 
 ### Category: testability
 
@@ -332,9 +343,9 @@ Single PR with two acceptance criteria:
 
 Filed as one issue under `testability` (rather than splitting between testability and magic-numbers) because the work is one PR and the two criteria reinforce each other — the constants make the tests easier to write against named boundaries, and the tests pin the formula the constants document.
 
-### Category: dead-code-magic-numbers
+### Category: magic-numbers
 
-#### CR-2026-05-03-22 [dead-code-magic-numbers] Hotspot CSS background literal `rgba(0,0,0,0.01)` is duplicated of intent
+#### CR-2026-05-03-22 [magic-numbers] Hotspot CSS background literal `rgba(0,0,0,0.01)` is duplicated of intent
 
 **Severity:** nit
 **Files:** `src/ui/hotspot/hotspot_windows.rs:161`
@@ -367,4 +378,7 @@ Add 3-8 line `//!` headers to each of the listed files. Don't restate function s
 CLAUDE.md says: "Shared helper: `ui::widgets::app_icon_button()`." There is no `ui/widgets.rs` and no `app_icon_button` symbol in the codebase. Either the helper got removed in a refactor and the doc rotted, or the helper was planned and never landed. Either way, a contributor following the doc looks for the helper, can't find it, and now distrusts the rest of the doc. Same risk in the doc's claim that "GTK4 has no `set_image`/`set_image_position`. Use a vertical Box" — the actual button-layout helper inlined in three places (`pinned_button`, `task_button`, `launcher_button`) builds the box directly without any factored helper.
 
 **Proposed fix:**
-Either (a) remove the `app_icon_button()` reference from CLAUDE.md and replace with "see `ui::buttons::pinned_button` for the canonical pattern", or (b) actually extract the shared `Button + Image + label-or-indicator` shape from `ui/buttons.rs` into a `ui/widgets.rs` helper and update each callsite. (a) is the doc fix; (b) is the better long-term shape. (a) is a one-line PR, do that immediately to stop the doc-rot bleeding.
+
+**Issue scope (required now):** remove the `app_icon_button()` reference from CLAUDE.md and replace with "see `ui::buttons::pinned_button` for the canonical pattern". One-line doc fix; stops new contributors hunting for a helper that doesn't exist.
+
+**Alternative considered (optional):** actually extract the shared `Button + Image + label-or-indicator` shape from `ui/buttons.rs` into a `ui/widgets.rs` helper and update the three callsites (`pinned_button`, `task_button`, `launcher_button`). Better long-term shape; restores the helper the doc was always describing. File as a follow-up — pairs naturally with CR-2026-05-03-14 (the `widgets::children` iterator helper).
