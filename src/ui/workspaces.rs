@@ -12,12 +12,6 @@
 //! the focused monitor's `active_workspace` — which is exactly how
 //! both the Hyprland and Sway backends already plumb workspace state.
 
-// `build_row`, `build_workspace_row`, and `focused_workspace_id` are
-// the public widget API; nothing calls them yet because B4 only
-// creates the module — wiring into `dock_box::build` lands in B5
-// (jasonherald/nwg-dock#4). Removed once B5 lands.
-#![allow(dead_code)]
-
 use crate::context::DockContext;
 use gtk4::prelude::*;
 use nwg_common::compositor::Compositor;

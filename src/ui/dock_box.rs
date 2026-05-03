@@ -163,6 +163,12 @@ pub fn build(
         &active_class,
         &ignored_classes,
     );
+
+    if ctx.config.ws {
+        let workspaces_row = crate::ui::workspaces::build_workspace_row(ctx);
+        main_box.append(&workspaces_row);
+    }
+
     build_running_items(
         &main_box,
         ctx,
