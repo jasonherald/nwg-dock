@@ -51,6 +51,22 @@ window {{
 .drag-remove-icon {{
     color: #e06c75;
 }}
+
+/* Workspace switcher row + buttons (--ws flag) */
+.dock-workspace-row {{
+    margin: 0;
+    padding: 0;
+}}
+.dock-workspace-button {{
+    min-height: 0;
+    min-width: 0;
+    margin: 0 2px;
+    padding: 2px 6px;
+}}
+.dock-workspace-active {{
+    background-color: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+}}
 "#,
         a = DEFAULT_BG_ALPHA,
     )
