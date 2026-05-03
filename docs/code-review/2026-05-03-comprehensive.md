@@ -43,7 +43,7 @@ Run `cargo clippy --fix --workspace --all-targets -- -W clippy::uninlined_format
 `as` for widening primitive conversions is idiomatic but loses the compile-time guarantee that the cast is lossless. `f64::from(opacity.min(100))`, `u128::from(hide_timeout)`, and `f64::from(dock_box.width())` are infallible at the type level — switching to them documents the lossless intent and lets clippy's `cast_lossless` lint stay loud about future *narrowing* casts that genuinely need scrutiny.
 
 **Proposed fix:**
-Replace each of the above with `Type::from(...)`. The `usize`-to-`i32` casts in `src/ui/dock_box.rs:89-90` (`scale_icon_size`) are NOT in scope here — those are genuinely lossy and want a comment or `try_from` guard, but that's a different finding (see below).
+Replace each of the above with `Type::from(...)`. The `usize`-to-`i32` casts in `src/ui/dock_box.rs:89-90` (`scale_icon_size`) are NOT in scope here — those are genuinely lossy and want a comment or `try_from` guard, but that's covered by CR-2026-05-03-21.
 
 #### CR-2026-05-03-03 [rust-idioms] `f64::hypot(dx, dy)` instead of `(dx*dx + dy*dy).sqrt()`
 
@@ -126,7 +126,7 @@ Change `pub` to `pub(crate)` on every item that doesn't cross a module boundary 
 All 17 fields on `DockState` are `pub`, including the three coupled drag-coordination booleans (`drag_pending`, `drag_source_index`, `drag_outside_dock`), the two coupled launch-animation maps (`launching`, `launch_timeouts`), and the active-config `Rc<DockConfig>`. There's no place in the code that owns the invariants between them — e.g. that `drag_source_index = Some(_)` implies `drag_pending = true`, or that `launching.contains_key(k)` should always have a matching entry in `launch_timeouts`. As the dock grows, these will drift. Today the invariants are spread across `ui/drag.rs`, `events.rs`, `ui/launch_bounce.rs`, and `ui/hotspot/cursor_poller.rs`.
 
 **Proposed fix:**
-Two surgical refactors that don't redesign the type: (1) introduce `fn DockState::start_drag(&mut self, idx: usize)` / `end_drag(&mut self)` and route all drag-state mutations through them; the three booleans become private. (2) Introduce `fn DockState::start_launch(...)` / `cancel_launch(...)` paired with a private struct holding both maps. Tests already exist for `task_instances` and `hyphen_space_variant`; tests for the new methods would catch invariant violations. Don't touch the rest of the fields — the read-only ones (clients, pinned, app_dirs) are fine as `pub(crate)`. (No field on this struct should remain externally `pub` once the broader visibility audit lands; the binary-crate argument from the previous finding applies.)
+Two surgical refactors that don't redesign the type: (1) introduce `fn DockState::start_drag(&mut self, idx: usize)` / `end_drag(&mut self)` and route all drag-state mutations through them; the three booleans become private. (2) Introduce `fn DockState::start_launch(...)` / `cancel_launch(...)` paired with a private struct holding both maps. Tests already exist for `task_instances` and `hyphen_space_variant`; tests for the new methods would catch invariant violations. Don't touch the rest of the fields — the read-only ones (clients, pinned, app_dirs) are fine as `pub(crate)`. (No field on this struct should remain externally `pub` once the broader visibility audit lands; the binary-crate argument from CR-2026-05-03-07 applies.)
 
 #### CR-2026-05-03-09 [api-hygiene] `ActivateParams` and `DockContext` overlap; pick one
 
@@ -167,10 +167,10 @@ Take `compositor: &Rc<dyn Compositor>`. Drop the clone in `main.rs:213`. (`state
 **Files:** `src/ui/menus.rs:90,97,104,113,142,168,199,212,214,216`
 
 **Why this matters:**
-Eleven `let _ = ...` sites in `menus.rs` discard `Result`s with `// Best-effort: window may have closed`. The intent is fine — the user clicked "Close" on a window that's already gone, the IPC will fail, that's life. But "window may have closed" is just one possible cause; the IPC call might also have failed because the compositor socket dropped, or because the dock is on a different host than it thinks, or because we sent malformed JSON. CLAUDE.md says "log errors, never silently discard." A pinned right-click → Pin → save fails silently (line 168) and the user has no idea the pin file didn't update. That's a real UX hole.
+Eleven `let _ = ...` sites in `menus.rs` discard `Result`s with `// Best-effort: window may have closed`. The intent is fine — the user clicked "Close" on a window that's already gone, the IPC will fail, that's life. But "window may have closed" is just one possible cause; the IPC call might also have failed because the compositor socket dropped, or because the dock is on a different host than it thinks, or because we sent malformed JSON. CLAUDE.md says "log errors, never silently discard." The pinned right-click → Pin path's `save_pinned(...)` callsite (currently `src/ui/menus.rs:168`) is the most user-visible offender: a pin-file write failure surfaces nothing in logs and the user has no idea their pin didn't persist. That's a real UX hole.
 
 **Proposed fix:**
-At minimum, downgrade the writes to `if let Err(e) = ... { log::debug!("..."); }` — that keeps the call best-effort but makes failures debuggable. For the file-write case (`save_pinned`) escalate to `log::warn!` since silent loss is worse there than for window-IPC. The pattern is already used correctly in `drag.rs:236-237` and `drag.rs:269-271`. Just bring `menus.rs` in line.
+At minimum, downgrade the writes to `if let Err(e) = ... { log::debug!("..."); }` — that keeps the call best-effort but makes failures debuggable. For the `save_pinned(...)` callsite specifically, escalate to `log::warn!` since silent pin-file loss is worse than failed window-IPC. The pattern is already used correctly elsewhere in the codebase (e.g., the file-write paths in `src/ui/drag.rs`'s `handle_drop` and `handle_drag_end`). Just bring `menus.rs` in line.
 
 #### CR-2026-05-03-12 [error-handling] `apply_hot_reloadable_changes` swallows the CSS provider it deliberately drops
 
@@ -203,7 +203,7 @@ Either rename to `let _unused_provider` to signal "intentionally ignored value, 
 Public, documented, never used as a public symbol. `resolve_monitors` and `resolve_monitors_quiet` both invoke it internally via `resolve_monitors_inner`. There are no other callers in the crate. The `pub` is dead-API surface — the kind of tech debt that accumulates when extracting a helper "just in case."
 
 **Proposed fix:**
-Make it private. Combined with the broader visibility audit (api-hygiene first finding) this becomes an automatic catch — leaving it `pub(crate)` is also fine but it should at least not be `pub` to the external world.
+Make it private. Combined with the broader visibility audit (CR-2026-05-03-07) this becomes an automatic catch — leaving it `pub(crate)` is also fine but it should at least not be `pub` to the external world.
 
 #### CR-2026-05-03-14 [naming-and-comments] `count_children` exists in `rebuild.rs` but `find_child_button` does the same walk in `dock_box.rs`
 
