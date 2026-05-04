@@ -114,9 +114,15 @@ impl DockState {
 
     /// Sets the drag-pending flag only (no source index yet).
     /// Called at press-down (drag_begin), before the movement threshold
-    /// is crossed. Clears any stale outside-dock state from a prior drag.
+    /// is crossed. Defensively clears any stale `drag_source_index` and
+    /// `drag_outside_dock` from a prior drag — `end_drag` should have
+    /// cleared them on release, but if a drag ever ended in an unusual
+    /// path (window close mid-drag, panic in a handler) we don't want
+    /// the next press-down to inherit a phantom claimed index that
+    /// would bypass the threshold gate in `ui::drag::handle_drag_motion`.
     pub(crate) fn set_drag_pending(&mut self) {
         self.drag_pending = true;
+        self.drag_source_index = None;
         self.drag_outside_dock = false;
     }
 
@@ -371,19 +377,30 @@ mod tests {
     }
 
     #[test]
-    fn set_drag_pending_clears_prior_outside_state() {
+    fn set_drag_pending_clears_stale_drag_fields() {
         let mut s = make_state();
-        // Simulate a prior drag that ended with outside=true (shouldn't happen,
-        // but set_drag_pending should clear stale state defensively)
+        // Seed stale carry-over directly (bypassing the public API) — what
+        // we'd see if a prior drag ended through an abnormal path that
+        // skipped `end_drag`. The test module shares the file with
+        // DockState so the private fields are reachable here, which is
+        // the only way to fabricate this state without simulating the
+        // abnormal-exit path itself.
+        s.drag_pending = false;
+        s.drag_source_index = Some(0);
+        s.drag_outside_dock = true;
+
         s.set_drag_pending();
-        s.claim_drag(0);
-        s.set_drag_outside(true);
-        assert!(s.is_drag_outside_dock());
-        s.end_drag();
-        // After end_drag, a new set_drag_pending starts fresh
-        s.set_drag_pending();
-        assert!(!s.is_drag_outside_dock());
-        assert_eq!(s.drag_source_index(), None);
+
+        assert!(s.is_drag_pending());
+        assert_eq!(
+            s.drag_source_index(),
+            None,
+            "stale source index must be cleared so the threshold gate fires for the new drag"
+        );
+        assert!(
+            !s.is_drag_outside_dock(),
+            "stale outside-dock flag must be cleared at press-down"
+        );
     }
 
     #[test]
