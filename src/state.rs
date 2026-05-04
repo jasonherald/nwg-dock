@@ -37,13 +37,18 @@ pub(crate) struct DockState {
     pub(crate) locked: bool,
 
     // --- Drag-state fields (coupled invariant) ---
-    // Invariant: `drag_source_index = Some(_)` implies `drag_pending = true`.
-    // Invariant: `drag_source_index = None` implies `drag_pending = false`
-    //            AND `drag_outside_dock = false`.
-    // All mutations go through `set_drag_pending`, `claim_drag`, `end_drag`,
-    // `set_drag_outside`. The split between `set_drag_pending` (press-down)
-    // and `claim_drag` (movement-threshold crossing) maps to GTK4's two-phase
-    // gesture sequence — see ui/drag.rs for the call ordering.
+    // The press-down → threshold-crossing → release lifecycle is two-phase,
+    // so the invariants flow on `drag_pending` (the outer phase), not on
+    // `drag_source_index`:
+    //   Invariant: `drag_source_index = Some(_)` implies `drag_pending = true`.
+    //   Invariant: `drag_pending = false`        implies `drag_source_index = None`
+    //                                            AND `drag_outside_dock = false`.
+    // The reverse implication does NOT hold: between press-down and the
+    // movement threshold, `drag_pending = true` and `drag_source_index = None`
+    // is the legal in-flight state. All mutations go through
+    // `set_drag_pending` (press-down), `claim_drag` (threshold crossed),
+    // `end_drag` (release/cancel), and `set_drag_outside` (cursor tracking
+    // mid-drag) — see ui/drag.rs for the call ordering.
     /// True from press-down through drag-end. Set in drag_begin before the
     /// movement threshold is crossed, so consumers (event poller, autohide)
     /// can defer rebuilds during the entire press→drag→release lifecycle.

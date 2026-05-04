@@ -64,7 +64,14 @@ pub(crate) fn cancel_matched(state: &Rc<RefCell<DockState>>) -> bool {
     let launching_snapshot = s.launching_snapshot();
     let mut cancelled = false;
     for (app_id, launch_count) in launching_snapshot {
-        let current_count = count_instances(&s, &app_id);
+        // Use the same matching algorithm `start()` used to seed the
+        // baseline: `task_instances` includes `initial_class` matches
+        // for child-window grouping (e.g. Playwright browsers under
+        // VSCode). The previous local `count_instances` helper only
+        // matched on `class`, so for apps with child-window grouping
+        // the baseline could exceed the current count and the bounce
+        // would never cancel.
+        let current_count = s.task_instances(&app_id).len();
         if current_count > launch_count {
             if let Some((_counter, source_id)) = s.cancel_launch(&app_id) {
                 source_id.remove();
@@ -73,27 +80,4 @@ pub(crate) fn cancel_matched(state: &Rc<RefCell<DockState>>) -> bool {
         }
     }
     cancelled
-}
-
-/// Counts current instances of an app, including hyphen↔space variants
-/// and WMClass mappings.
-fn count_instances(state: &DockState, app_id: &str) -> usize {
-    let alt = crate::state::hyphen_space_variant(app_id);
-    let mut count = 0;
-    for c in &state.clients {
-        let class = c.class.to_lowercase();
-        if class == app_id
-            || class == alt
-            || state
-                .wm_class_to_desktop_id
-                .iter()
-                .any(|(wm_class, desktop_id)| {
-                    desktop_id.eq_ignore_ascii_case(app_id)
-                        && wm_class.eq_ignore_ascii_case(&c.class)
-                })
-        {
-            count += 1;
-        }
-    }
-    count
 }
