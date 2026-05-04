@@ -326,8 +326,8 @@ fn update_removal_indicator(item: &gtk4::Widget, outside: bool, icon_size: i32) 
 
 /// Returns true if the cursor position is outside the dock box bounds.
 fn is_cursor_outside_dock(dock_box: &gtk4::Box, x: f64, y: f64, vertical: bool) -> bool {
-    let w = dock_box.width() as f64;
-    let h = dock_box.height() as f64;
+    let w = f64::from(dock_box.width());
+    let h = f64::from(dock_box.height());
     if vertical {
         x < -OUTSIDE_MARGIN || x > w + OUTSIDE_MARGIN
     } else {
@@ -351,9 +351,9 @@ fn calculate_drop_index(
         if widget != *dragged && widget.has_css_class("pinned-item") {
             let alloc = widget.allocation();
             let center = if vertical {
-                alloc.y() as f64 + alloc.height() as f64 / 2.0
+                f64::from(alloc.y()) + f64::from(alloc.height()) / 2.0
             } else {
-                alloc.x() as f64 + alloc.width() as f64 / 2.0
+                f64::from(alloc.x()) + f64::from(alloc.width()) / 2.0
             };
             positions.push(center);
         }

@@ -268,7 +268,7 @@ fn check_hide_timer(
     let mut left = left_at.borrow_mut();
     match *left {
         None => *left = Some(std::time::Instant::now()),
-        Some(when) if when.elapsed().as_millis() >= hide_timeout as u128 => {
+        Some(when) if when.elapsed().as_millis() >= u128::from(hide_timeout) => {
             log::debug!("Cursor left dock area, hiding");
             for dock in docks.borrow().iter() {
                 dock.win.set_visible(false);
