@@ -1,4 +1,4 @@
-use super::constants::DEFAULT_BG_RGB;
+use super::constants::{DEFAULT_BG_RGB, OPACITY_PERCENT_MAX};
 use nwg_common::config::css;
 use std::path::Path;
 
@@ -95,7 +95,7 @@ pub fn load_dock_css(css_path: &Path, opacity: u8) {
 
     // Apply user-configurable opacity — overrides embedded default but
     // user CSS file can still override this via hot-reload.
-    let alpha = f64::from(opacity.min(100)) / 100.0;
+    let alpha = f64::from(opacity.min(OPACITY_PERCENT_MAX)) / f64::from(OPACITY_PERCENT_MAX);
     let (r, g, b) = DEFAULT_BG_RGB;
     let opacity_css = format!("window {{ background-color: rgba({r}, {g}, {b}, {alpha:.2}); }}");
     css::load_css_override(&opacity_css);

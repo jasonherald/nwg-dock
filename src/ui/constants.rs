@@ -46,3 +46,12 @@ pub const WORKSPACE_ROW_SPACING: i32 = 0;
 /// icon biases the icon button's visual center). See
 /// `ui/workspaces.rs::build_workspace_row` for the per-Position margin.
 pub const INDICATOR_DIVISOR: i32 = 8;
+
+/// Upper bound on the `--opacity 0..=100` CLI/config value. Used to clamp
+/// user input before computing `alpha = opacity / OPACITY_PERCENT_MAX`
+/// for the dock background's CSS `rgba(...)`. Single source of truth
+/// shared by `ui::css::load_dock_css` (cold start) and
+/// `config_file::apply_hot_reloadable_changes` (hot reload) so the two
+/// paths can't drift. Will move alongside the alpha computation when
+/// CR-2026-05-03-17 consolidates the CSS-reload logic into `ui::css`.
+pub const OPACITY_PERCENT_MAX: u8 = 100;

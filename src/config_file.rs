@@ -608,8 +608,10 @@ fn apply_hot_reloadable_changes(
     // Opacity: re-load the override CSS using the canonical default
     // background RGB. Kept in sync with ui::css::load_dock_css.
     if old.opacity != new.opacity {
-        let alpha = f64::from(new.opacity.min(100)) / 100.0;
-        let (r, g, b) = crate::ui::constants::DEFAULT_BG_RGB;
+        use crate::ui::constants::{DEFAULT_BG_RGB, OPACITY_PERCENT_MAX};
+        let alpha =
+            f64::from(new.opacity.min(OPACITY_PERCENT_MAX)) / f64::from(OPACITY_PERCENT_MAX);
+        let (r, g, b) = DEFAULT_BG_RGB;
         let opacity_css =
             format!("window {{ background-color: rgba({r}, {g}, {b}, {alpha:.2}); }}");
         nwg_common::config::css::load_css_override(&opacity_css);
