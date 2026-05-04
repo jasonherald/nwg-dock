@@ -20,6 +20,8 @@ use std::rc::Rc;
 /// Shared context passed to all dock UI builders.
 ///
 /// Bundles the commonly-needed references so functions don't need 5+ parameters.
+/// All fields are `Rc`s, so cloning is cheap (reference-count bumps only).
+#[derive(Clone)]
 pub(crate) struct DockContext {
     pub(crate) config: Rc<DockConfig>,
     pub(crate) state: Rc<RefCell<DockState>>,

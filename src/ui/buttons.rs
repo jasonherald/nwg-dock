@@ -224,26 +224,13 @@ pub(crate) fn task_button(
     // Right-click → context menu
     let class = client.class.clone();
     let insts = instances.to_vec();
-    let config_ref = ctx.config.as_ref().clone();
-    let state_ref = Rc::clone(&ctx.state);
-    let comp = Rc::clone(&ctx.compositor);
-    let pinned_path = ctx.pinned_file.as_ref().clone();
-    let rebuild_ref = Rc::clone(&ctx.rebuild);
+    let ctx_right = ctx.clone();
     let right = gtk4::GestureClick::new();
     right.set_button(3);
     right.connect_released(move |gesture, _, _, _| {
         gesture.set_state(gtk4::EventSequenceState::Claimed);
         if let Some(widget) = gesture.widget() {
-            menus::show_context_menu(
-                &class,
-                &insts,
-                &config_ref,
-                &state_ref,
-                &comp,
-                &pinned_path,
-                &rebuild_ref,
-                &widget,
-            );
+            menus::show_context_menu(&class, &insts, &ctx_right, &widget);
         }
     });
     button.add_controller(right);
