@@ -112,27 +112,17 @@ fn needs_rebuild(state: &Rc<RefCell<DockState>>) -> bool {
     old_classes != new_classes || old_active != new_active
 }
 
-/// Starts a background thread that listens for compositor events
-/// and triggers UI refreshes on the main thread via polling.
-/// Only rebuilds if the client list actually changed (different count
-/// or different set of classes).
-pub(crate) fn start_event_listener(
-    state: Rc<RefCell<DockState>>,
-    rebuild_fn: Rc<dyn Fn()>,
-    compositor: &dyn Compositor,
+/// Spawns the background event-stream drain thread.
+///
+/// Both senders are moved into the closure so the thread owns its end of the
+/// channels for the duration of the process. The thread exits (and drops the
+/// senders) only if the compositor event stream returns an error or either
+/// receiver has already been dropped, which signals the main thread is gone.
+fn spawn_event_thread(
+    mut stream: Box<dyn nwg_common::compositor::WmEventStream>,
+    sender: mpsc::Sender<String>,
+    ws_sender: mpsc::Sender<()>,
 ) {
-    let (sender, receiver) = mpsc::channel::<String>();
-    let (ws_sender, ws_receiver) = mpsc::channel::<()>();
-
-    // Create the event stream on the main thread, then move it to the background
-    let mut stream = match compositor.event_stream() {
-        Ok(s) => s,
-        Err(e) => {
-            log::error!("Failed to connect to compositor event stream: {e}");
-            return;
-        }
-    };
-
     std::thread::spawn(move || {
         loop {
             match stream.next_event() {
@@ -155,14 +145,53 @@ pub(crate) fn start_event_listener(
             }
         }
     });
+}
 
+/// Installs the GLib timer that polls both channels every
+/// `EVENT_POLL_INTERVAL_MS` and triggers a rebuild when either
+/// the client list changed or a workspace event arrived.
+///
+/// Both receivers are moved into the timer closure, keeping the channel ends
+/// alive for the lifetime of the GLib main loop. The poller is structurally
+/// testable with `mpsc::channel` fixtures — actual coverage is in CR-21's scope.
+fn install_event_poller(
+    receiver: mpsc::Receiver<String>,
+    workspace_receiver: mpsc::Receiver<()>,
+    state: Rc<RefCell<DockState>>,
+    rebuild_fn: Rc<dyn Fn()>,
+) {
     glib::timeout_add_local(
         std::time::Duration::from_millis(EVENT_POLL_INTERVAL_MS),
         move || {
-            poll_and_rebuild(&receiver, &ws_receiver, &state, &rebuild_fn);
+            poll_and_rebuild(&receiver, &workspace_receiver, &state, &rebuild_fn);
             glib::ControlFlow::Continue
         },
     );
+}
+
+/// Starts a background thread that listens for compositor events
+/// and triggers UI refreshes on the main thread via polling.
+/// Only rebuilds if the client list actually changed (different count
+/// or different set of classes).
+pub(crate) fn start_event_listener(
+    state: Rc<RefCell<DockState>>,
+    rebuild_fn: Rc<dyn Fn()>,
+    compositor: &dyn Compositor,
+) {
+    let (sender, receiver) = mpsc::channel::<String>();
+    let (ws_sender, ws_receiver) = mpsc::channel::<()>();
+
+    // Create the event stream on the main thread, then move it to the background.
+    let stream = match compositor.event_stream() {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("Failed to connect to compositor event stream: {e}");
+            return;
+        }
+    };
+
+    spawn_event_thread(stream, sender, ws_sender);
+    install_event_poller(receiver, ws_receiver, state, rebuild_fn);
 }
 
 #[cfg(test)]
