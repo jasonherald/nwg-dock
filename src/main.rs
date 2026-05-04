@@ -126,7 +126,7 @@ fn main() {
         .application_id("com.mac-dock.hyprland")
         .build();
 
-    let bootstrap = Rc::new(ActivateParams {
+    let bootstrap = Rc::new(DockBootstrap {
         css_path: Rc::new(css_path),
         config: Rc::new(config),
         matches: Rc::new(matches),
@@ -144,12 +144,21 @@ fn main() {
     app.run_with_args::<String>(&[]);
 }
 
-/// Bundles everything `activate_dock` needs from `main()` so the
-/// signature stays at one parameter (per CLAUDE.md "never pass 7+
-/// individual refs"). Built once in `main`, cloned on each
-/// `connect_activate` callback. Distinct from `DockContext` (which
-/// covers the rebuild path's narrower needs).
-struct ActivateParams {
+/// Cold-start bootstrap data — the references and handles needed
+/// once during `connect_activate` to wire up the dock. Distinct
+/// from `DockContext` (in `src/context.rs`), which is the smaller
+/// recurring bag the rebuild path operates on. Fields here that
+/// don't appear in `DockContext` are startup-only: `css_path` is
+/// applied once at cold start, `matches` is preserved for hot-
+/// reload's `was_set_on_cli` checks, `app_dirs` and `sig_rx` are
+/// consumed by listeners that run for the process lifetime.
+///
+/// The two structs share `config`, `compositor`, `pinned_file`,
+/// and `data_home` because both lifecycles need them — that overlap
+/// is intentional. The follow-up to fold `DockBootstrap` into
+/// holding a `DockContext` sub-struct is filed as a separate epic
+/// task.
+struct DockBootstrap {
     css_path: Rc<std::path::PathBuf>,
     config: Rc<DockConfig>,
     matches: Rc<clap::ArgMatches>,
@@ -161,7 +170,7 @@ struct ActivateParams {
 }
 
 /// Sets up the dock UI: state, monitors, windows, rebuild function, and listeners.
-fn activate_dock(app: &gtk4::Application, params: &ActivateParams) {
+fn activate_dock(app: &gtk4::Application, params: &DockBootstrap) {
     ui::css::load_dock_css(&params.css_path, params.config.opacity);
     let _hold = app.hold();
 
