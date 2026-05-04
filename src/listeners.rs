@@ -72,7 +72,14 @@ pub(crate) fn setup_pin_watcher(pinned_file: &Path, rebuild: &Rc<dyn Fn()>) {
             );
             return;
         }
-        // Block forever — watcher stops if thread exits
+        // Watcher lives until process exit. The thread is parked
+        // indefinitely to keep this closure (and therefore the captured
+        // `tx` sender that `recommended_watcher` holds) alive — if this
+        // thread exited, `tx` would drop, the watcher would close, and
+        // the inotify subscription would be lost. `park()` never returns,
+        // so the thread's `Drop` and the watcher's `Drop` never run; that
+        // matches what we want here (process-lifetime watcher), but means
+        // teardown stories that assume thread exit don't apply.
         std::thread::park();
     });
 
