@@ -135,7 +135,7 @@ pub enum ConfigError {
 impl std::fmt::Display for ConfigError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ConfigError::ParseError(e) => write!(f, "parse error: {}", e),
+            ConfigError::ParseError(e) => write!(f, "parse error: {e}"),
             ConfigError::InvalidValue {
                 section,
                 key,
@@ -143,10 +143,9 @@ impl std::fmt::Display for ConfigError {
                 error_message,
             } => write!(
                 f,
-                "invalid value for {}.{}: '{}' — expected {}",
-                section, key, error_debug, error_message
+                "invalid value for {section}.{key}: '{error_debug}' — expected {error_message}"
             ),
-            ConfigError::IoError(e) => write!(f, "{}", e),
+            ConfigError::IoError(e) => write!(f, "{e}"),
         }
     }
 }
@@ -210,8 +209,8 @@ pub fn load_config_file(path: &std::path::Path) -> Result<Option<RawConfigFile>,
             ConfigError::InvalidValue {
                 section,
                 key,
-                error_debug: format!("{:?}", inner),
-                error_message: format!("{}", inner),
+                error_debug: format!("{inner:?}"),
+                error_message: format!("{inner}"),
             }
         })
         .map(Some)
@@ -289,7 +288,7 @@ pub fn collect_unknown_keys(value: &toml::Value) -> Vec<String> {
         };
         for (key, _) in section_table {
             if !known_keys.contains(&key.as_str()) {
-                unknowns.push(format!("{}.{}", section_name, key));
+                unknowns.push(format!("{section_name}.{key}"));
             }
         }
     }
@@ -545,7 +544,7 @@ pub fn apply_config_change(
         "Hot-reloading config; applied fields: {:?}, restart-required: {}",
         applied,
         match &result {
-            DiffResult::RestartRequired { restart_fields, .. } => format!("{:?}", restart_fields),
+            DiffResult::RestartRequired { restart_fields, .. } => format!("{restart_fields:?}"),
             _ => "none".to_string(),
         }
     );
@@ -609,8 +608,10 @@ fn apply_hot_reloadable_changes(
     // Opacity: re-load the override CSS using the canonical default
     // background RGB. Kept in sync with ui::css::load_dock_css.
     if old.opacity != new.opacity {
-        let alpha = (new.opacity.min(100) as f64) / 100.0;
-        let (r, g, b) = crate::ui::constants::DEFAULT_BG_RGB;
+        use crate::ui::constants::{DEFAULT_BG_RGB, OPACITY_PERCENT_MAX};
+        let alpha =
+            f64::from(new.opacity.min(OPACITY_PERCENT_MAX)) / f64::from(OPACITY_PERCENT_MAX);
+        let (r, g, b) = DEFAULT_BG_RGB;
         let opacity_css =
             format!("window {{ background-color: rgba({r}, {g}, {b}, {alpha:.2}); }}");
         nwg_common::config::css::load_css_override(&opacity_css);
@@ -660,10 +661,9 @@ fn preserve_restart_fields(source: &DockConfig, target: &mut DockConfig, fields:
             "exclusive" => target.exclusive = source.exclusive,
             // RESTART_REQUIRED_FIELDS is the only source of values for
             // `fields`, so any other label is a programming error.
-            other => log::warn!(
-                "preserve_restart_fields: unknown field '{}' (programming error)",
-                other
-            ),
+            other => {
+                log::warn!("preserve_restart_fields: unknown field '{other}' (programming error)")
+            }
         }
     }
 }
@@ -721,7 +721,7 @@ pub fn print_effective_config(cfg: &DockConfig) -> String {
     toml::to_string_pretty(&raw).unwrap_or_else(|e| {
         // Serializing should never fail for our well-typed schema, but
         // returning a usable string keeps --print-config from panicking.
-        format!("# print_effective_config serialization failed: {}\n", e)
+        format!("# print_effective_config serialization failed: {e}\n")
     })
 }
 
@@ -770,12 +770,7 @@ pub fn notify_user(summary: &str, body: &str) {
         .icon("nwg-dock-hyprland")
         .show()
     {
-        log::warn!(
-            "Failed to send notification ({}): {} — {}",
-            e,
-            summary,
-            body
-        );
+        log::warn!("Failed to send notification ({e}): {summary} — {body}");
     }
 }
 
@@ -843,7 +838,7 @@ where
     }) {
         Ok(w) => w,
         Err(e) => {
-            log::warn!("Failed to create config watcher: {}", e);
+            log::warn!("Failed to create config watcher: {e}");
             return;
         }
     };
@@ -964,7 +959,7 @@ mod tests {
         .unwrap();
         match raw.filters.ignore_classes {
             Some(StringOrList::String(s)) => assert_eq!(s, "steam firefox"),
-            other => panic!("expected String form, got {:?}", other),
+            other => panic!("expected String form, got {other:?}"),
         }
     }
 
@@ -979,7 +974,7 @@ mod tests {
         .unwrap();
         match raw.filters.ignore_classes {
             Some(StringOrList::List(v)) => assert_eq!(v, vec!["steam", "firefox"]),
-            other => panic!("expected List form, got {:?}", other),
+            other => panic!("expected List form, got {other:?}"),
         }
     }
 
@@ -1069,8 +1064,8 @@ mod tests {
     fn config_error_parse_display() {
         let err = toml::from_str::<RawConfigFile>("[behavior\nfoo = 1").expect_err("must fail");
         let ce = ConfigError::ParseError(err);
-        let display = format!("{}", ce);
-        assert!(display.contains("parse error"), "got: {}", display);
+        let display = format!("{ce}");
+        assert!(display.contains("parse error"), "got: {display}");
     }
 
     #[test]
@@ -1081,13 +1076,12 @@ mod tests {
             error_debug: "side".into(),
             error_message: "one of: top, bottom, left, right".into(),
         };
-        let display = format!("{}", ce);
-        assert!(display.contains("layout.position"), "got: {}", display);
-        assert!(display.contains("side"), "got: {}", display);
+        let display = format!("{ce}");
+        assert!(display.contains("layout.position"), "got: {display}");
+        assert!(display.contains("side"), "got: {display}");
         assert!(
             display.contains("top, bottom, left, right"),
-            "got: {}",
-            display
+            "got: {display}"
         );
     }
 
@@ -1095,8 +1089,8 @@ mod tests {
     fn config_error_io_display() {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
         let ce = ConfigError::IoError(io_err);
-        let display = format!("{}", ce);
-        assert!(display.contains("missing"), "got: {}", display);
+        let display = format!("{ce}");
+        assert!(display.contains("missing"), "got: {display}");
     }
 
     // ─── load_config_file ──────────────────────────────────────────────────
@@ -1132,7 +1126,7 @@ mod tests {
     fn load_returns_parse_error_on_bad_toml() {
         let f = temp_config("[behavior\nautohide = true");
         let err = load_config_file(f.path()).unwrap_err();
-        assert!(matches!(err, ConfigError::ParseError(_)), "got: {:?}", err);
+        assert!(matches!(err, ConfigError::ParseError(_)), "got: {err:?}");
     }
 
     #[test]
@@ -1149,7 +1143,7 @@ mod tests {
                 assert_eq!(section, "layout");
                 assert_eq!(key, "position");
             }
-            other => panic!("expected InvalidValue, got {:?}", other),
+            other => panic!("expected InvalidValue, got {other:?}"),
         }
     }
 
@@ -1164,8 +1158,7 @@ mod tests {
         let unknowns = collect_unknown_keys(&value);
         assert!(
             unknowns.contains(&"behavior.unknown-typo".to_string()),
-            "got: {:?}",
-            unknowns
+            "got: {unknowns:?}"
         );
 
         let f = temp_config(content);
@@ -1185,8 +1178,7 @@ mod tests {
         let unknowns = collect_unknown_keys(&value);
         assert!(
             unknowns.contains(&"unknown-section".to_string()),
-            "got: {:?}",
-            unknowns
+            "got: {unknowns:?}"
         );
 
         let f = temp_config(content);
@@ -1337,7 +1329,7 @@ mod tests {
             "[launcher]",
             "[filters]",
         ] {
-            assert!(s.contains(header), "expected {} in:\n{}", header, s);
+            assert!(s.contains(header), "expected {header} in:\n{s}");
         }
     }
 
@@ -1365,13 +1357,9 @@ mod tests {
                 applied,
             } => {
                 assert_eq!(restart_fields, vec!["multi"]);
-                assert!(
-                    applied.is_empty(),
-                    "expected no applied, got: {:?}",
-                    applied
-                );
+                assert!(applied.is_empty(), "expected no applied, got: {applied:?}");
             }
-            other => panic!("expected RestartRequired, got {:?}", other),
+            other => panic!("expected RestartRequired, got {other:?}"),
         }
     }
 
@@ -1384,19 +1372,14 @@ mod tests {
                 restart_fields,
                 applied,
             } => {
-                assert!(
-                    restart_fields.contains(&"multi"),
-                    "got: {:?}",
-                    restart_fields
-                );
+                assert!(restart_fields.contains(&"multi"), "got: {restart_fields:?}");
                 assert!(
                     restart_fields.contains(&"autohide"),
-                    "got: {:?}",
-                    restart_fields
+                    "got: {restart_fields:?}"
                 );
-                assert!(applied.is_empty(), "got: {:?}", applied);
+                assert!(applied.is_empty(), "got: {applied:?}");
             }
-            other => panic!("expected RestartRequired, got {:?}", other),
+            other => panic!("expected RestartRequired, got {other:?}"),
         }
     }
 
@@ -1408,7 +1391,7 @@ mod tests {
             DiffResult::Applicable { applied } => {
                 assert!(applied.contains(&"icon-size"));
             }
-            other => panic!("expected Applicable, got {:?}", other),
+            other => panic!("expected Applicable, got {other:?}"),
         }
     }
 
@@ -1422,20 +1405,15 @@ mod tests {
                 applied,
             } => {
                 // Restart-required field surfaces in the footnote.
-                assert!(
-                    restart_fields.contains(&"multi"),
-                    "got: {:?}",
-                    restart_fields
-                );
+                assert!(restart_fields.contains(&"multi"), "got: {restart_fields:?}");
                 assert!(
                     !restart_fields.contains(&"icon-size"),
-                    "got: {:?}",
-                    restart_fields
+                    "got: {restart_fields:?}"
                 );
                 // Hot-reloadable field still applies on the same save.
-                assert!(applied.contains(&"icon-size"), "got: {:?}", applied);
+                assert!(applied.contains(&"icon-size"), "got: {applied:?}");
             }
-            other => panic!("expected RestartRequired, got {:?}", other),
+            other => panic!("expected RestartRequired, got {other:?}"),
         }
     }
 
@@ -1465,10 +1443,10 @@ mod tests {
         let b = cfg(&["test", "--mt", "5", "--mb", "10"]);
         match diff_config(&a, &b) {
             DiffResult::Applicable { applied } => {
-                assert!(applied.contains(&"mt"), "got: {:?}", applied);
-                assert!(applied.contains(&"mb"), "got: {:?}", applied);
+                assert!(applied.contains(&"mt"), "got: {applied:?}");
+                assert!(applied.contains(&"mb"), "got: {applied:?}");
             }
-            other => panic!("expected Applicable, got {:?}", other),
+            other => panic!("expected Applicable, got {other:?}"),
         }
     }
 
@@ -1487,7 +1465,7 @@ mod tests {
             DiffResult::Applicable { applied } => {
                 assert!(applied.contains(&"launcher-cmd"));
             }
-            other => panic!("expected Applicable, got {:?}", other),
+            other => panic!("expected Applicable, got {other:?}"),
         }
     }
 
@@ -1504,7 +1482,7 @@ mod tests {
                 assert_eq!(restart_fields, vec!["exclusive"]);
                 assert!(applied.is_empty());
             }
-            other => panic!("expected RestartRequired, got {:?}", other),
+            other => panic!("expected RestartRequired, got {other:?}"),
         }
     }
 
@@ -1519,10 +1497,10 @@ mod tests {
                 applied,
             } => {
                 assert_eq!(restart_fields, vec!["multi"]);
-                assert!(applied.contains(&"icon-size"), "got: {:?}", applied);
-                assert!(applied.contains(&"opacity"), "got: {:?}", applied);
+                assert!(applied.contains(&"icon-size"), "got: {applied:?}");
+                assert!(applied.contains(&"opacity"), "got: {applied:?}");
             }
-            other => panic!("expected RestartRequired, got {:?}", other),
+            other => panic!("expected RestartRequired, got {other:?}"),
         }
     }
 

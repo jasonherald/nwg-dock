@@ -111,7 +111,7 @@ pub(super) fn start_hotspot_windows(
 
                 if keep_visible {
                     *left = None;
-                } else if when.elapsed().as_millis() >= hide_timeout as u128 {
+                } else if when.elapsed().as_millis() >= u128::from(hide_timeout) {
                     log::debug!("Cursor left dock area, hiding (hotspot mode)");
                     for dock in docks.borrow().iter() {
                         dock.win.set_visible(false);

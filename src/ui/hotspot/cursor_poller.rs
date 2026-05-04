@@ -35,7 +35,7 @@ pub(super) fn start_cursor_poller(
         Rc::new(RefCell::new(match compositor.list_monitors() {
             Ok(m) => m,
             Err(e) => {
-                log::warn!("Initial monitor list failed: {}", e);
+                log::warn!("Initial monitor list failed: {e}");
                 Vec::new()
             }
         }));
@@ -88,7 +88,7 @@ pub(super) fn start_cursor_poller(
                     *count = 0;
                     match compositor.list_monitors() {
                         Ok(m) => *cached_monitors.borrow_mut() = m,
-                        Err(e) => log::debug!("Monitor cache refresh failed: {}", e),
+                        Err(e) => log::debug!("Monitor cache refresh failed: {e}"),
                     }
                 }
             }
@@ -168,14 +168,14 @@ fn fresh_fullscreen_check(ctx: &PollContext<'_>, monitor_name: &str) -> bool {
     let fresh_monitors = match ctx.compositor.list_monitors() {
         Ok(m) => m,
         Err(e) => {
-            log::debug!("Fresh monitor query for fullscreen check failed: {}", e);
+            log::debug!("Fresh monitor query for fullscreen check failed: {e}");
             return false;
         }
     };
     let fresh_clients = match ctx.compositor.list_clients() {
         Ok(c) => c,
         Err(e) => {
-            log::debug!("Fresh client query for fullscreen check failed: {}", e);
+            log::debug!("Fresh client query for fullscreen check failed: {e}");
             return false;
         }
     };
@@ -268,7 +268,7 @@ fn check_hide_timer(
     let mut left = left_at.borrow_mut();
     match *left {
         None => *left = Some(std::time::Instant::now()),
-        Some(when) if when.elapsed().as_millis() >= hide_timeout as u128 => {
+        Some(when) if when.elapsed().as_millis() >= u128::from(hide_timeout) => {
             log::debug!("Cursor left dock area, hiding");
             for dock in docks.borrow().iter() {
                 dock.win.set_visible(false);
@@ -410,7 +410,7 @@ mod tests {
             .with_active_workspace(
                 WmWorkspace::default()
                     .with_id(active_workspace_id)
-                    .with_name(format!("{}", active_workspace_id)),
+                    .with_name(format!("{active_workspace_id}")),
             )
     }
 
@@ -422,7 +422,7 @@ mod tests {
     fn test_client_on_workspace(monitor_id: i32, fullscreen: bool, workspace_id: i32) -> WmClient {
         // `WmClient` is #[non_exhaustive] — construct via Default + fluent setters.
         WmClient::default()
-            .with_id(format!("0x{}", monitor_id))
+            .with_id(format!("0x{monitor_id}"))
             .with_class("test")
             .with_initial_class("test")
             .with_title("test")
@@ -430,7 +430,7 @@ mod tests {
             .with_workspace(
                 WmWorkspace::default()
                     .with_id(workspace_id)
-                    .with_name(format!("{}", workspace_id)),
+                    .with_name(format!("{workspace_id}")),
             )
             .with_monitor_id(monitor_id)
             .with_fullscreen(fullscreen)

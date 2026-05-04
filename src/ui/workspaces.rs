@@ -69,9 +69,7 @@ pub fn active_workspace_for_monitor(
         Ok(m) => m,
         Err(e) => {
             log::warn!(
-                "Failed to query monitors for workspace switcher (monitor='{}'): {}",
-                monitor_name,
-                e
+                "Failed to query monitors for workspace switcher (monitor='{monitor_name}'): {e}"
             );
             return None;
         }
@@ -107,7 +105,7 @@ pub fn build_row(
         let n = btn_plan.n;
         btn.connect_clicked(move |_| {
             if let Err(e) = compositor.focus_workspace(n) {
-                log::warn!("Failed to focus workspace {}: {}", n, e);
+                log::warn!("Failed to focus workspace {n}: {e}");
             }
         });
         row.append(&btn);

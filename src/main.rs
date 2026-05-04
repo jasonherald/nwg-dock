@@ -35,7 +35,7 @@ fn main() {
     let cli_config = match DockConfig::from_arg_matches(&matches) {
         Ok(c) => c,
         Err(e) => {
-            eprintln!("error: {}", e);
+            eprintln!("error: {e}");
             std::process::exit(2);
         }
     };
@@ -106,14 +106,14 @@ fn main() {
 
     let config_dir = paths::config_dir("nwg-dock-hyprland");
     if let Err(e) = paths::ensure_dir(&config_dir) {
-        log::warn!("Failed to create config dir: {}", e);
+        log::warn!("Failed to create config dir: {e}");
     }
 
     let css_path = config_dir.join(&config.css_file);
     if !css_path.exists() {
         let src = data_home.join("nwg-dock-hyprland/style.css");
         if let Err(e) = paths::copy_file(&src, &css_path) {
-            log::warn!("Error copying default CSS: {}", e);
+            log::warn!("Error copying default CSS: {e}");
         }
     }
 
@@ -175,7 +175,7 @@ fn activate_dock(app: &gtk4::Application, params: &ActivateParams) {
     state.borrow_mut().locked = ui::dock_menu::load_lock_state();
     state.borrow_mut().wm_class_to_desktop_id = build_wm_class_map(&params.app_dirs);
     if let Err(e) = state.borrow_mut().refresh_clients() {
-        log::error!("Couldn't list clients: {}", e);
+        log::error!("Couldn't list clients: {e}");
     }
 
     let monitors = monitor::resolve_monitors(&params.config);
@@ -210,7 +210,7 @@ fn activate_dock(app: &gtk4::Application, params: &ActivateParams) {
     events::start_event_listener(
         Rc::clone(&state),
         Rc::clone(&rebuild),
-        Rc::clone(&params.compositor),
+        params.compositor.as_ref(),
     );
     listeners::setup_pin_watcher(&params.pinned_file, &rebuild);
     listeners::setup_signal_poller(app, &per_monitor, &params.sig_rx);
@@ -263,8 +263,8 @@ fn on_config_save(
     let raw = match config_file::load_config_file(path) {
         Ok(r) => r,
         Err(e) => {
-            log::error!("Config reload failed: {}", e);
-            config_file::notify_user("nwg-dock: config error", &format!("{}", e));
+            log::error!("Config reload failed: {e}");
+            config_file::notify_user("nwg-dock: config error", &format!("{e}"));
             return;
         }
     };
@@ -279,10 +279,7 @@ fn on_config_save(
     let cli_snapshot = match DockConfig::from_arg_matches(&matches) {
         Ok(c) => c,
         Err(e) => {
-            log::error!(
-                "Failed to rebuild CLI baseline from stored ArgMatches: {}",
-                e
-            );
+            log::error!("Failed to rebuild CLI baseline from stored ArgMatches: {e}");
             return;
         }
     };
@@ -325,10 +322,7 @@ fn auto_detect_launcher(config: &mut DockConfig) {
     }
     let cmd = config.launcher_cmd.split_whitespace().next().unwrap_or("");
     if !cmd.is_empty() && !command_exists(cmd) {
-        log::info!(
-            "Launcher command '{}' not found on PATH, hiding launcher",
-            cmd
-        );
+        log::info!("Launcher command '{cmd}' not found on PATH, hiding launcher");
         config.nolauncher = true;
     }
 }
@@ -347,10 +341,10 @@ fn acquire_singleton_lock(
         Err(existing_pid) => {
             if let Some(pid) = existing_pid {
                 if is_resident {
-                    log::info!("Running instance found (pid {}), terminating...", pid);
+                    log::info!("Running instance found (pid {pid}), terminating...");
                 } else {
                     signals::send_signal_to_pid(pid, signals::sig_toggle());
-                    log::info!("Sent toggle signal to running instance (pid {}), bye!", pid);
+                    log::info!("Sent toggle signal to running instance (pid {pid}), bye!");
                 }
             }
             std::process::exit(0);

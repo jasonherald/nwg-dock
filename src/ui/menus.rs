@@ -106,7 +106,7 @@ pub fn show_context_menu(
         }));
 
         for ws in 1..=config.num_ws {
-            actions_box.append(&action_button(&format!("-> WS {}", ws), &popover, {
+            actions_box.append(&action_button(&format!("-> WS {ws}"), &popover, {
                 let id = id.clone();
                 let comp = Rc::clone(compositor);
                 move || {
@@ -235,7 +235,7 @@ fn action_button(
 fn truncate_title(title: &str, max: usize) -> String {
     if title.chars().count() > max {
         let truncated: String = title.chars().take(max).collect();
-        format!("{}...", truncated)
+        format!("{truncated}...")
     } else {
         title.to_string()
     }

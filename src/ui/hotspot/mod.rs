@@ -19,14 +19,14 @@ pub(super) fn show_on_monitor_only_by_name(
 ) {
     let dock_list = docks.borrow();
     if !dock_list.iter().any(|d| d.output_name == target_name) {
-        log::debug!("No dock window for monitor {}", target_name);
+        log::debug!("No dock window for monitor {target_name}");
         return;
     }
 
     for dock in dock_list.iter() {
         dock.win.set_visible(dock.output_name == target_name);
     }
-    log::debug!("Dock shown on monitor {}", target_name);
+    log::debug!("Dock shown on monitor {target_name}");
 }
 
 /// Sets up autohide using the appropriate method for the compositor.

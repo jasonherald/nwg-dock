@@ -1,4 +1,4 @@
-use super::constants::DEFAULT_BG_RGB;
+use super::constants::{DEFAULT_BG_RGB, OPACITY_PERCENT_MAX};
 use nwg_common::config::css;
 use std::path::Path;
 
@@ -19,7 +19,7 @@ fn gtk4_compat_css() -> String {
     format!(
         r#"
 window {{
-    background-color: rgba({r}, {g}, {b}, {a:.2});
+    background-color: rgba({r}, {g}, {b}, {DEFAULT_BG_ALPHA:.2});
 }}
 .dock-button {{
     min-height: 0;
@@ -82,7 +82,6 @@ window {{
     color: rgba(255, 255, 255, 1.0);
 }}
 "#,
-        a = DEFAULT_BG_ALPHA,
     )
 }
 
@@ -96,7 +95,7 @@ pub fn load_dock_css(css_path: &Path, opacity: u8) {
 
     // Apply user-configurable opacity — overrides embedded default but
     // user CSS file can still override this via hot-reload.
-    let alpha = opacity.min(100) as f64 / 100.0;
+    let alpha = f64::from(opacity.min(OPACITY_PERCENT_MAX)) / f64::from(OPACITY_PERCENT_MAX);
     let (r, g, b) = DEFAULT_BG_RGB;
     let opacity_css = format!("window {{ background-color: rgba({r}, {g}, {b}, {alpha:.2}); }}");
     css::load_css_override(&opacity_css);
@@ -108,23 +107,20 @@ pub fn load_dock_css(css_path: &Path, opacity: u8) {
     let bounce_css = format!(
         "@keyframes dock-bounce {{\
             0%   {{ transform: translateY(0px); }}\
-            30%  {{ transform: translateY(-{h}px); }}\
+            30%  {{ transform: translateY(-{LAUNCH_BOUNCE_HEIGHT_PX}px); }}\
             60%  {{ transform: translateY(0px); }}\
-            78%  {{ transform: translateY({d}px); }}\
+            78%  {{ transform: translateY({LAUNCH_BOUNCE_DIP_PX}px); }}\
             100% {{ transform: translateY(0px); }}\
         }}\
         @keyframes dock-bounce-vertical {{\
             0%   {{ transform: translateX(0px); }}\
-            30%  {{ transform: translateX(-{h}px); }}\
+            30%  {{ transform: translateX(-{LAUNCH_BOUNCE_HEIGHT_PX}px); }}\
             60%  {{ transform: translateX(0px); }}\
-            78%  {{ transform: translateX({d}px); }}\
+            78%  {{ transform: translateX({LAUNCH_BOUNCE_DIP_PX}px); }}\
             100% {{ transform: translateX(0px); }}\
         }}\
-        .dock-launching {{ animation: dock-bounce {dur}ms linear infinite; }}\
-        .dock-launching-vertical {{ animation: dock-bounce-vertical {dur}ms linear infinite; }}",
-        h = LAUNCH_BOUNCE_HEIGHT_PX,
-        d = LAUNCH_BOUNCE_DIP_PX,
-        dur = LAUNCH_BOUNCE_DURATION_MS,
+        .dock-launching {{ animation: dock-bounce {LAUNCH_BOUNCE_DURATION_MS}ms linear infinite; }}\
+        .dock-launching-vertical {{ animation: dock-bounce-vertical {LAUNCH_BOUNCE_DURATION_MS}ms linear infinite; }}",
     );
     css::load_css_from_data(&bounce_css);
 }

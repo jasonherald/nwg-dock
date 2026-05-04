@@ -93,7 +93,7 @@ fn needs_rebuild(state: &Rc<RefCell<DockState>>) -> bool {
         .map(|c| c.class.clone());
 
     if let Err(e) = state.borrow_mut().refresh_clients() {
-        log::error!("Failed to refresh clients: {}", e);
+        log::error!("Failed to refresh clients: {e}");
         return false;
     }
 
@@ -119,7 +119,7 @@ fn needs_rebuild(state: &Rc<RefCell<DockState>>) -> bool {
 pub fn start_event_listener(
     state: Rc<RefCell<DockState>>,
     rebuild_fn: Rc<dyn Fn()>,
-    compositor: Rc<dyn Compositor>,
+    compositor: &dyn Compositor,
 ) {
     let (sender, receiver) = mpsc::channel::<String>();
     let (ws_sender, ws_receiver) = mpsc::channel::<()>();
@@ -128,7 +128,7 @@ pub fn start_event_listener(
     let mut stream = match compositor.event_stream() {
         Ok(s) => s,
         Err(e) => {
-            log::error!("Failed to connect to compositor event stream: {}", e);
+            log::error!("Failed to connect to compositor event stream: {e}");
             return;
         }
     };
@@ -149,7 +149,7 @@ pub fn start_event_listener(
                 }
                 Ok(_) => {} // Other events ignored
                 Err(e) => {
-                    log::error!("Compositor event stream error: {}", e);
+                    log::error!("Compositor event stream error: {e}");
                     break;
                 }
             }

@@ -74,9 +74,9 @@ pub fn setup_drag_gesture(
             return;
         };
 
-        let (dock_x, dock_y) = match widget.translate_coordinates(&dock_box, start_x, start_y) {
-            Some(coords) => coords,
-            None => return,
+        let Some((dock_x, dock_y)) = widget.translate_coordinates(&dock_box, start_x, start_y)
+        else {
+            return;
         };
 
         // Mark drag pending immediately so event poller/autohide defer rebuilds
@@ -109,7 +109,7 @@ pub fn setup_drag_gesture(
             // Only claim after meaningful movement. GTK4's GestureDrag fires
             // drag_update on ANY motion (no built-in threshold), so without
             // this check, a 1px wobble during a click suppresses Button::clicked.
-            let distance = (offset_x * offset_x + offset_y * offset_y).sqrt();
+            let distance = offset_x.hypot(offset_y);
             if distance < DRAG_CLAIM_THRESHOLD {
                 return;
             }
@@ -232,9 +232,9 @@ fn unpin_by_drag(
     let mut st = state.borrow_mut();
     if source_index < st.pinned.len() {
         let removed = st.pinned.remove(source_index);
-        log::info!("Unpinned by drag-off: {}", removed);
+        log::info!("Unpinned by drag-off: {removed}");
         if let Err(e) = pinning::save_pinned(&st.pinned, pinned_path) {
-            log::error!("Failed to save pins: {}", e);
+            log::error!("Failed to save pins: {e}");
         }
         drop(st);
         let rebuild = Rc::clone(rebuild);
@@ -267,7 +267,7 @@ fn reorder_pinned(
     st.pinned.insert(insert_at, item);
 
     if let Err(e) = pinning::save_pinned(&st.pinned, pinned_path) {
-        log::error!("Failed to save reordered pins: {}", e);
+        log::error!("Failed to save reordered pins: {e}");
     }
     drop(st);
     let rebuild = Rc::clone(rebuild);
@@ -326,8 +326,8 @@ fn update_removal_indicator(item: &gtk4::Widget, outside: bool, icon_size: i32) 
 
 /// Returns true if the cursor position is outside the dock box bounds.
 fn is_cursor_outside_dock(dock_box: &gtk4::Box, x: f64, y: f64, vertical: bool) -> bool {
-    let w = dock_box.width() as f64;
-    let h = dock_box.height() as f64;
+    let w = f64::from(dock_box.width());
+    let h = f64::from(dock_box.height());
     if vertical {
         x < -OUTSIDE_MARGIN || x > w + OUTSIDE_MARGIN
     } else {
@@ -351,9 +351,9 @@ fn calculate_drop_index(
         if widget != *dragged && widget.has_css_class("pinned-item") {
             let alloc = widget.allocation();
             let center = if vertical {
-                alloc.y() as f64 + alloc.height() as f64 / 2.0
+                f64::from(alloc.y()) + f64::from(alloc.height()) / 2.0
             } else {
-                alloc.x() as f64 + alloc.width() as f64 / 2.0
+                f64::from(alloc.x()) + f64::from(alloc.width()) / 2.0
             };
             positions.push(center);
         }
