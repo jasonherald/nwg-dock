@@ -87,21 +87,27 @@ pub(crate) fn show_context_menu(
             let id = id.clone();
             let comp = Rc::clone(compositor);
             move || {
-                let _ = comp.close_window(&id); // Best-effort: window may have closed
+                if let Err(e) = comp.close_window(&id) {
+                    log::debug!("close_window failed for '{id}': {e}"); // Best-effort: window may have closed
+                }
             }
         }));
         actions_box.append(&action_button("Toggle Floating", &popover, {
             let id = id.clone();
             let comp = Rc::clone(compositor);
             move || {
-                let _ = comp.toggle_floating(&id); // Best-effort: window may have closed
+                if let Err(e) = comp.toggle_floating(&id) {
+                    log::debug!("toggle_floating failed for '{id}': {e}"); // Best-effort: window may have closed
+                }
             }
         }));
         actions_box.append(&action_button("Fullscreen", &popover, {
             let id = id.clone();
             let comp = Rc::clone(compositor);
             move || {
-                let _ = comp.toggle_fullscreen(&id); // Best-effort: window may have closed
+                if let Err(e) = comp.toggle_fullscreen(&id) {
+                    log::debug!("toggle_fullscreen failed for '{id}': {e}"); // Best-effort: window may have closed
+                }
             }
         }));
 
@@ -110,7 +116,9 @@ pub(crate) fn show_context_menu(
                 let id = id.clone();
                 let comp = Rc::clone(compositor);
                 move || {
-                    let _ = comp.move_to_workspace(&id, ws); // Best-effort: window may have closed
+                    if let Err(e) = comp.move_to_workspace(&id, ws) {
+                        log::debug!("move_to_workspace failed for '{id}' ws={ws}: {e}"); // Best-effort: window may have closed
+                    }
                 }
             }));
         }
@@ -139,7 +147,9 @@ pub(crate) fn show_context_menu(
     let comp = Rc::clone(compositor);
     btn.connect_clicked(move |_| {
         for id in &insts {
-            let _ = comp.close_window(id);
+            if let Err(e) = comp.close_window(id) {
+                log::debug!("close_window failed for '{id}': {e}"); // Best-effort: window may have closed
+            }
         }
         p.popdown();
     });
@@ -165,7 +175,13 @@ pub(crate) fn show_context_menu(
         } else {
             pinning::pin_item(&mut s.pinned, &class_str);
         }
-        let _ = pinning::save_pinned(&s.pinned, &pinned_path); // Best-effort: file I/O may fail
+        if let Err(e) = pinning::save_pinned(&s.pinned, &pinned_path) {
+            log::warn!(
+                "Failed to save pinned apps to '{}': {}",
+                pinned_path.display(),
+                e
+            );
+        }
         drop(s);
         p.popdown();
         rebuild_ref();
@@ -196,7 +212,13 @@ pub(crate) fn show_pinned_context_menu(
     btn.connect_clicked(move |_| {
         let mut s = state_ref.borrow_mut();
         pinning::unpin_item(&mut s.pinned, &id);
-        let _ = pinning::save_pinned(&s.pinned, &pinned_path); // Best-effort: file I/O may fail
+        if let Err(e) = pinning::save_pinned(&s.pinned, &pinned_path) {
+            log::warn!(
+                "Failed to save pinned apps to '{}': {}",
+                pinned_path.display(),
+                e
+            );
+        }
         drop(s);
         p.popdown();
         rebuild_ref();
@@ -209,11 +231,15 @@ pub(crate) fn show_pinned_context_menu(
 pub(crate) fn focus_window(id: &str, workspace_name: &str, compositor: &dyn Compositor) {
     if workspace_name.starts_with("special") {
         let special_name = workspace_name.strip_prefix("special:").unwrap_or("");
-        let _ = compositor.toggle_special_workspace(special_name); // Best-effort: Hyprland-specific
-    } else {
-        let _ = compositor.focus_window(id); // Best-effort: window may have closed
+        if let Err(e) = compositor.toggle_special_workspace(special_name) {
+            log::debug!("toggle_special_workspace failed for '{special_name}': {e}"); // Best-effort: Hyprland-specific
+        }
+    } else if let Err(e) = compositor.focus_window(id) {
+        log::debug!("focus_window failed for '{id}': {e}"); // Best-effort: window may have closed
     }
-    let _ = compositor.raise_active(); // Best-effort: Sway no-ops this
+    if let Err(e) = compositor.raise_active() {
+        log::debug!("raise_active failed: {e}"); // Best-effort: Sway no-ops this
+    }
 }
 
 /// Creates a flat button that runs an action and closes the popover.
