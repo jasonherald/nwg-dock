@@ -109,7 +109,7 @@ pub fn setup_drag_gesture(
             // Only claim after meaningful movement. GTK4's GestureDrag fires
             // drag_update on ANY motion (no built-in threshold), so without
             // this check, a 1px wobble during a click suppresses Button::clicked.
-            let distance = (offset_x * offset_x + offset_y * offset_y).sqrt();
+            let distance = offset_x.hypot(offset_y);
             if distance < DRAG_CLAIM_THRESHOLD {
                 return;
             }
