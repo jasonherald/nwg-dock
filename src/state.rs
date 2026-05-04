@@ -109,6 +109,12 @@ impl DockState {
         config: Rc<DockConfig>,
         args_matches: clap::ArgMatches,
     ) -> Self {
+        // Seed scaled-icon size from the configured icon size; the
+        // first rebuild adjusts it via `scale_icon_size` based on the
+        // actual item count, but we want the initial value to reflect
+        // the user's `--icon-size` rather than duplicating the default
+        // from `config.rs` here as a magic literal.
+        let img_size_scaled = config.icon_size;
         Self {
             config,
             args_matches,
@@ -117,7 +123,7 @@ impl DockState {
             pinned: Vec::new(),
             app_dirs,
             compositor,
-            img_size_scaled: 48,
+            img_size_scaled,
             popover_open: false,
             locked: false,
             drag_pending: false,
@@ -332,7 +338,21 @@ impl DockState {
     /// Refreshes client list from the compositor.
     pub(crate) fn refresh_clients(&mut self) -> anyhow::Result<()> {
         self.clients = self.compositor.list_clients()?;
-        self.active_client = self.compositor.get_active_window().ok();
+        // `get_active_window` failing is distinct from "no active window".
+        // The previous `.ok()` shape collapsed both into None, so a
+        // genuine IPC failure (socket dropped, malformed payload) was
+        // indistinguishable from a workspace with no focused client.
+        // Log at debug so the trail is in journalctl when a user
+        // reports stale highlight, but don't propagate — the dock
+        // should keep running with its previous active-client snapshot
+        // rather than tearing down the rebuild path.
+        self.active_client = match self.compositor.get_active_window() {
+            Ok(client) => Some(client),
+            Err(e) => {
+                log::debug!("get_active_window failed: {e}");
+                None
+            }
+        };
         Ok(())
     }
 }

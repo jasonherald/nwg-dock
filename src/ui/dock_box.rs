@@ -343,7 +343,12 @@ mod tests {
     use std::collections::HashMap;
 
     fn default_config() -> DockConfig {
-        DockConfig::parse_from(["test"])
+        // Pin `--icon-size 48` explicitly so the scale-test assertions
+        // (1→48, 6→48, 8→48, 9→41, 12→36, 100→7) stay about
+        // `scale_icon_size`'s formula. Without the override these
+        // tests would also be silently asserting the current default
+        // of `icon_size` and would break if that default ever moved.
+        DockConfig::parse_from(["test", "--icon-size", "48"])
     }
 
     // ─── scale_icon_size: boundary and plateau cases ───────────────────────────
