@@ -57,10 +57,7 @@ pub fn show_dock_background_menu(
 /// Loads the lock state from cache.
 pub fn load_lock_state() -> bool {
     let path = lock_file_path();
-    std::fs::read_to_string(path)
-        .ok()
-        .map(|s| s.trim() == "true")
-        .unwrap_or(false) // default: unlocked
+    std::fs::read_to_string(path).is_ok_and(|s| s.trim() == "true") // default: unlocked
 }
 
 fn save_lock_state(locked: bool) {
