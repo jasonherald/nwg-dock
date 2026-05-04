@@ -72,7 +72,13 @@ pub(crate) struct DockState {
 
     // --- Launch-animation fields (coupled invariant) ---
     // Invariant: `launching.contains_key(k)` ↔ `launch_timeouts.contains_key(k)`.
-    // All mutations go through `start_launch` / `cancel_launch`.
+    // Mutations go through `start_launch` / `cancel_launch` for the normal
+    // begin/cancel paths, OR through the paired `remove_launching_only` +
+    // `remove_launch_timeout_only` for the timeout-fired path (where GLib
+    // has already consumed the `SourceId` on fire, so `cancel_launch` —
+    // which would return the SourceId expecting `.remove()` — is the wrong
+    // shape). The paired helpers must always be called together; calling
+    // one without the other breaks the invariant.
     /// App IDs currently showing launch bounce animation (issue #38).
     /// Value is the instance count at launch time — used to detect when a
     /// new window appears (count increases) vs an already-running app.
