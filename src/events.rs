@@ -119,7 +119,7 @@ fn needs_rebuild(state: &Rc<RefCell<DockState>>) -> bool {
 pub fn start_event_listener(
     state: Rc<RefCell<DockState>>,
     rebuild_fn: Rc<dyn Fn()>,
-    compositor: Rc<dyn Compositor>,
+    compositor: &dyn Compositor,
 ) {
     let (sender, receiver) = mpsc::channel::<String>();
     let (ws_sender, ws_receiver) = mpsc::channel::<()>();

@@ -74,7 +74,8 @@ pub fn setup_drag_gesture(
             return;
         };
 
-        let Some((dock_x, dock_y)) = widget.translate_coordinates(&dock_box, start_x, start_y) else {
+        let Some((dock_x, dock_y)) = widget.translate_coordinates(&dock_box, start_x, start_y)
+        else {
             return;
         };
 

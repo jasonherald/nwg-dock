@@ -210,7 +210,7 @@ fn activate_dock(app: &gtk4::Application, params: &ActivateParams) {
     events::start_event_listener(
         Rc::clone(&state),
         Rc::clone(&rebuild),
-        Rc::clone(&params.compositor),
+        params.compositor.as_ref(),
     );
     listeners::setup_pin_watcher(&params.pinned_file, &rebuild);
     listeners::setup_signal_poller(app, &per_monitor, &params.sig_rx);
@@ -279,9 +279,7 @@ fn on_config_save(
     let cli_snapshot = match DockConfig::from_arg_matches(&matches) {
         Ok(c) => c,
         Err(e) => {
-            log::error!(
-                "Failed to rebuild CLI baseline from stored ArgMatches: {e}"
-            );
+            log::error!("Failed to rebuild CLI baseline from stored ArgMatches: {e}");
             return;
         }
     };
@@ -324,9 +322,7 @@ fn auto_detect_launcher(config: &mut DockConfig) {
     }
     let cmd = config.launcher_cmd.split_whitespace().next().unwrap_or("");
     if !cmd.is_empty() && !command_exists(cmd) {
-        log::info!(
-            "Launcher command '{cmd}' not found on PATH, hiding launcher"
-        );
+        log::info!("Launcher command '{cmd}' not found on PATH, hiding launcher");
         config.nolauncher = true;
     }
 }

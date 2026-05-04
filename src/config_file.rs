@@ -659,9 +659,9 @@ fn preserve_restart_fields(source: &DockConfig, target: &mut DockConfig, fields:
             "exclusive" => target.exclusive = source.exclusive,
             // RESTART_REQUIRED_FIELDS is the only source of values for
             // `fields`, so any other label is a programming error.
-            other => log::warn!(
-                "preserve_restart_fields: unknown field '{other}' (programming error)"
-            ),
+            other => {
+                log::warn!("preserve_restart_fields: unknown field '{other}' (programming error)")
+            }
         }
     }
 }
@@ -768,9 +768,7 @@ pub fn notify_user(summary: &str, body: &str) {
         .icon("nwg-dock-hyprland")
         .show()
     {
-        log::warn!(
-            "Failed to send notification ({e}): {summary} — {body}"
-        );
+        log::warn!("Failed to send notification ({e}): {summary} — {body}");
     }
 }
 
@@ -1357,10 +1355,7 @@ mod tests {
                 applied,
             } => {
                 assert_eq!(restart_fields, vec!["multi"]);
-                assert!(
-                    applied.is_empty(),
-                    "expected no applied, got: {applied:?}"
-                );
+                assert!(applied.is_empty(), "expected no applied, got: {applied:?}");
             }
             other => panic!("expected RestartRequired, got {other:?}"),
         }
@@ -1375,10 +1370,7 @@ mod tests {
                 restart_fields,
                 applied,
             } => {
-                assert!(
-                    restart_fields.contains(&"multi"),
-                    "got: {restart_fields:?}"
-                );
+                assert!(restart_fields.contains(&"multi"), "got: {restart_fields:?}");
                 assert!(
                     restart_fields.contains(&"autohide"),
                     "got: {restart_fields:?}"
@@ -1411,10 +1403,7 @@ mod tests {
                 applied,
             } => {
                 // Restart-required field surfaces in the footnote.
-                assert!(
-                    restart_fields.contains(&"multi"),
-                    "got: {restart_fields:?}"
-                );
+                assert!(restart_fields.contains(&"multi"), "got: {restart_fields:?}");
                 assert!(
                     !restart_fields.contains(&"icon-size"),
                     "got: {restart_fields:?}"
