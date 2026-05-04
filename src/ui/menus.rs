@@ -106,6 +106,10 @@ pub(crate) fn show_context_menu(
             }
         }));
 
+        // Workspaces are 1-indexed by Hyprland/Sway convention — there is no
+        // "workspace 0" on either compositor. The upper bound `num_ws` comes
+        // from `--num-ws` (default 5; see `config.rs`) and matches the
+        // workspace switcher widget's range in `ui::workspaces`.
         for ws in 1..=ctx.config.num_ws {
             actions_box.append(&action_button(&format!("-> WS {ws}"), &popover, {
                 let id = id.clone();
