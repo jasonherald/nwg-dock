@@ -40,7 +40,10 @@ pub(crate) struct DockState {
     // Invariant: `drag_source_index = Some(_)` implies `drag_pending = true`.
     // Invariant: `drag_source_index = None` implies `drag_pending = false`
     //            AND `drag_outside_dock = false`.
-    // All mutations go through `start_drag`, `end_drag`, `set_drag_outside`.
+    // All mutations go through `set_drag_pending`, `claim_drag`, `end_drag`,
+    // `set_drag_outside`. The split between `set_drag_pending` (press-down)
+    // and `claim_drag` (movement-threshold crossing) maps to GTK4's two-phase
+    // gesture sequence — see ui/drag.rs for the call ordering.
     /// True from press-down through drag-end. Set in drag_begin before the
     /// movement threshold is crossed, so consumers (event poller, autohide)
     /// can defer rebuilds during the entire press→drag→release lifecycle.
@@ -172,10 +175,16 @@ impl DockState {
     /// Cancel an in-flight launch animation. Returns the GLib `SourceId`
     /// (so the caller can `remove()` it on the main loop) along with the
     /// counter, or `None` if no launch was tracked for `app_id`.
+    ///
+    /// Both maps are cleared unconditionally so that under any invariant
+    /// violation (only one map carrying `app_id`) the call still leaves
+    /// the state consistent — the previous sequential `?` shape would
+    /// have stripped `launching` while leaving `launch_timeouts` orphaned
+    /// if the maps had ever diverged.
     pub(crate) fn cancel_launch(&mut self, app_id: &str) -> Option<(usize, glib::SourceId)> {
-        let counter = self.launching.remove(app_id)?;
-        let source = self.launch_timeouts.remove(app_id)?;
-        Some((counter, source))
+        let counter = self.launching.remove(app_id);
+        let source = self.launch_timeouts.remove(app_id);
+        counter.zip(source)
     }
 
     /// Returns true if `app_id` is currently in the launching set.
@@ -275,55 +284,58 @@ mod tests {
     use clap::{CommandFactory, Parser};
     use nwg_common::compositor::{Compositor, WmClient, WmEventStream, WmMonitor};
 
-    /// Minimal compositor stub for unit tests — returns
-    /// `DockError::NoCompositorDetected` for all IPC calls so tests that
-    /// don't exercise compositor paths can run without a live compositor.
+    /// Minimal compositor stub for unit tests. `DockState::new` only
+    /// stores the `Rc<dyn Compositor>` — no methods are invoked from the
+    /// drag/launch test paths — so every method here is `unimplemented!`.
+    /// If a future test exercises a compositor-touching code path, the
+    /// panic message + backtrace will point straight at the unstubbed
+    /// method so it can be filled in then rather than now.
     struct StubCompositor;
     impl Compositor for StubCompositor {
         fn list_clients(&self) -> nwg_common::Result<Vec<WmClient>> {
-            Ok(vec![])
+            unimplemented!("StubCompositor: list_clients not used in unit tests")
         }
         fn list_monitors(&self) -> nwg_common::Result<Vec<WmMonitor>> {
-            Ok(vec![])
+            unimplemented!("StubCompositor: list_monitors not used in unit tests")
         }
         fn get_active_window(&self) -> nwg_common::Result<WmClient> {
-            Err(nwg_common::DockError::NoCompositorDetected)
+            unimplemented!("StubCompositor: get_active_window not used in unit tests")
         }
         fn get_cursor_position(&self) -> Option<(i32, i32)> {
-            None
+            unimplemented!("StubCompositor: get_cursor_position not used in unit tests")
         }
         fn supports_cursor_position(&self) -> bool {
-            false
+            unimplemented!("StubCompositor: supports_cursor_position not used in unit tests")
         }
         fn event_stream(&self) -> nwg_common::Result<Box<dyn WmEventStream>> {
-            Err(nwg_common::DockError::NoCompositorDetected)
+            unimplemented!("StubCompositor: event_stream not used in unit tests")
         }
         fn focus_window(&self, _id: &str) -> nwg_common::Result<()> {
-            Err(nwg_common::DockError::NoCompositorDetected)
+            unimplemented!("StubCompositor: focus_window not used in unit tests")
         }
         fn raise_active(&self) -> nwg_common::Result<()> {
-            Err(nwg_common::DockError::NoCompositorDetected)
+            unimplemented!("StubCompositor: raise_active not used in unit tests")
         }
         fn close_window(&self, _id: &str) -> nwg_common::Result<()> {
-            Err(nwg_common::DockError::NoCompositorDetected)
+            unimplemented!("StubCompositor: close_window not used in unit tests")
         }
         fn toggle_floating(&self, _id: &str) -> nwg_common::Result<()> {
-            Err(nwg_common::DockError::NoCompositorDetected)
+            unimplemented!("StubCompositor: toggle_floating not used in unit tests")
         }
         fn toggle_fullscreen(&self, _id: &str) -> nwg_common::Result<()> {
-            Err(nwg_common::DockError::NoCompositorDetected)
+            unimplemented!("StubCompositor: toggle_fullscreen not used in unit tests")
         }
         fn move_to_workspace(&self, _id: &str, _ws: i32) -> nwg_common::Result<()> {
-            Err(nwg_common::DockError::NoCompositorDetected)
+            unimplemented!("StubCompositor: move_to_workspace not used in unit tests")
         }
         fn focus_workspace(&self, _ws: i32) -> nwg_common::Result<()> {
-            Err(nwg_common::DockError::NoCompositorDetected)
+            unimplemented!("StubCompositor: focus_workspace not used in unit tests")
         }
         fn toggle_special_workspace(&self, _name: &str) -> nwg_common::Result<()> {
-            Err(nwg_common::DockError::NoCompositorDetected)
+            unimplemented!("StubCompositor: toggle_special_workspace not used in unit tests")
         }
         fn exec(&self, _cmd: &str) -> nwg_common::Result<()> {
-            Err(nwg_common::DockError::NoCompositorDetected)
+            unimplemented!("StubCompositor: exec not used in unit tests")
         }
     }
 
@@ -400,6 +412,14 @@ mod tests {
     // the launching HashMap through the snapshot/is_launching accessors,
     // and seed state using a private insert via `launching` insert inside a
     // test-only helper on the struct.
+    //
+    // Coverage gap (intentional): the `Some(_)` paths for `is_launching`,
+    // `launching_snapshot`, `remove_launching_only`, and the full
+    // start_launch → cancel_launch round-trip are NOT exercised here.
+    // They require a real `glib::SourceId`, which only exists inside a
+    // running GLib main loop. The integration test harness (Sway-bootstrap
+    // smoke under `tests/integration/`) covers those paths through the
+    // launch-bounce animation flow.
 
     #[test]
     fn cancel_launch_returns_none_when_not_tracked() {
