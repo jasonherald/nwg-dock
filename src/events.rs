@@ -24,7 +24,7 @@ fn poll_and_rebuild(
     state: &Rc<RefCell<DockState>>,
     rebuild_fn: &Rc<dyn Fn()>,
 ) {
-    let dragging = state.borrow().drag_pending || state.borrow().drag_source_index.is_some();
+    let dragging = state.borrow().is_drag_pending() || state.borrow().drag_source_index().is_some();
     let workspace_changed = drain_workspace_events(workspace_receiver);
     let client_changed = drain_new_events(receiver) && needs_rebuild(state);
 

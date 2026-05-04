@@ -105,7 +105,7 @@ pub(super) fn start_hotspot_windows(
                 // Read live config + state in the same brief borrow.
                 let s = state.borrow();
                 let keep_visible =
-                    s.popover_open || s.drag_pending || s.drag_source_index.is_some();
+                    s.popover_open || s.is_drag_pending() || s.drag_source_index().is_some();
                 let hide_timeout = s.config.hide_timeout;
                 drop(s);
 

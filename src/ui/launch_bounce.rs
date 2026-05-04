@@ -9,15 +9,18 @@ use std::rc::Rc;
 /// when a NEW window appears (not just an existing one).
 pub(crate) fn start(app_id: &str, state: &Rc<RefCell<DockState>>, rebuild: &Rc<dyn Fn()>) {
     let id = app_id.to_lowercase();
-    {
+
+    // Get the current instance count and cancel any prior animation for this
+    // app (double-click resets the timer).
+    let instance_count = {
         let mut s = state.borrow_mut();
         let count = s.task_instances(&id).len();
-        s.launching.insert(id.clone(), count);
         // Cancel previous timeout for this app (double-click resets the timer)
-        if let Some(old) = s.launch_timeouts.remove(&id) {
-            old.remove();
+        if let Some((_counter, old_source)) = s.cancel_launch(&id) {
+            old_source.remove();
         }
-    }
+        count
+    };
 
     let state_ref = Rc::clone(state);
     let rebuild_ref = Rc::clone(rebuild);
@@ -26,14 +29,23 @@ pub(crate) fn start(app_id: &str, state: &Rc<RefCell<DockState>>, rebuild: &Rc<d
         std::time::Duration::from_secs(LAUNCH_ANIMATION_TIMEOUT_SECS),
         move || {
             let mut s = state_ref.borrow_mut();
-            if s.launching.remove(&id_timeout).is_some() {
-                s.launch_timeouts.remove(&id_timeout);
+            // The timeout fired — launching map entry is still present (wasn't
+            // cancelled by a matching window). Remove it. The SourceId was
+            // consumed by GLib on fire, so we use the split-remove helpers
+            // rather than cancel_launch (which would return the already-consumed
+            // SourceId and expect the caller to call .remove() on it).
+            if s.remove_launching_only(&id_timeout) {
+                s.remove_launch_timeout_only(&id_timeout);
                 drop(s);
                 rebuild_ref();
             }
         },
     );
-    state.borrow_mut().launch_timeouts.insert(id, source_id);
+
+    // Atomically register both the instance count and the timeout source id.
+    state
+        .borrow_mut()
+        .start_launch(id, instance_count, source_id);
 
     // Rebuild immediately to show the animation
     rebuild();
@@ -45,18 +57,16 @@ pub(crate) fn start(app_id: &str, state: &Rc<RefCell<DockState>>, rebuild: &Rc<d
 /// NEW window appears, not because the app was already running.
 pub(crate) fn cancel_matched(state: &Rc<RefCell<DockState>>) -> bool {
     let mut s = state.borrow_mut();
-    if s.launching.is_empty() {
+    if s.launching_is_empty() {
         return false;
     }
 
-    let launching_snapshot: Vec<(String, usize)> =
-        s.launching.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    let launching_snapshot = s.launching_snapshot();
     let mut cancelled = false;
     for (app_id, launch_count) in launching_snapshot {
         let current_count = count_instances(&s, &app_id);
         if current_count > launch_count {
-            s.launching.remove(&app_id);
-            if let Some(source_id) = s.launch_timeouts.remove(&app_id) {
+            if let Some((_counter, source_id)) = s.cancel_launch(&app_id) {
                 source_id.remove();
             }
             cancelled = true;

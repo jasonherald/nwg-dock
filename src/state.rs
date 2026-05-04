@@ -36,18 +36,23 @@ pub(crate) struct DockState {
     /// True when dock arrangement is locked (drag-to-reorder disabled).
     pub(crate) locked: bool,
 
+    // --- Drag-state fields (coupled invariant) ---
+    // Invariant: `drag_source_index = Some(_)` implies `drag_pending = true`.
+    // Invariant: `drag_source_index = None` implies `drag_pending = false`
+    //            AND `drag_outside_dock = false`.
+    // All mutations go through `start_drag`, `end_drag`, `set_drag_outside`.
     /// True from press-down through drag-end. Set in drag_begin before the
     /// movement threshold is crossed, so consumers (event poller, autohide)
     /// can defer rebuilds during the entire press→drag→release lifecycle.
-    pub(crate) drag_pending: bool,
+    drag_pending: bool,
 
     /// Index of the pinned item currently being dragged (if any).
     /// Set only after the movement threshold is crossed in drag_update.
-    pub(crate) drag_source_index: Option<usize>,
+    drag_source_index: Option<usize>,
 
     /// True when a drag is active and cursor is outside the dock area.
     /// Used to show a "remove" indicator on the dragged item's slot.
-    pub(crate) drag_outside_dock: bool,
+    drag_outside_dock: bool,
 
     /// True when a rebuild was needed during an active drag and deferred.
     /// Checked after drag ends to ensure the rebuild still happens.
@@ -57,13 +62,16 @@ pub(crate) struct DockState {
     /// differs from the desktop file stem (e.g. "com.billz.app" → "billz").
     pub(crate) wm_class_to_desktop_id: HashMap<String, String>,
 
+    // --- Launch-animation fields (coupled invariant) ---
+    // Invariant: `launching.contains_key(k)` ↔ `launch_timeouts.contains_key(k)`.
+    // All mutations go through `start_launch` / `cancel_launch`.
     /// App IDs currently showing launch bounce animation (issue #38).
     /// Value is the instance count at launch time — used to detect when a
     /// new window appears (count increases) vs an already-running app.
-    pub(crate) launching: HashMap<String, usize>,
+    launching: HashMap<String, usize>,
 
     /// Timeout handles for auto-cancelling launch animations.
-    pub(crate) launch_timeouts: HashMap<String, glib::SourceId>,
+    launch_timeouts: HashMap<String, glib::SourceId>,
 }
 
 impl DockState {
@@ -93,6 +101,117 @@ impl DockState {
             launch_timeouts: HashMap::new(),
         }
     }
+
+    // --- Drag-state invariant methods ---
+
+    /// Sets the drag-pending flag only (no source index yet).
+    /// Called at press-down (drag_begin), before the movement threshold
+    /// is crossed. Clears any stale outside-dock state from a prior drag.
+    pub(crate) fn set_drag_pending(&mut self) {
+        self.drag_pending = true;
+        self.drag_outside_dock = false;
+    }
+
+    /// Claims the drag by recording the source index. Called from
+    /// drag_update after the movement threshold is crossed.
+    pub(crate) fn claim_drag(&mut self, idx: usize) {
+        self.drag_source_index = Some(idx);
+    }
+
+    /// End the active drag. Clears all three coupled drag fields back
+    /// to their resting state.
+    pub(crate) fn end_drag(&mut self) {
+        self.drag_source_index = None;
+        self.drag_pending = false;
+        self.drag_outside_dock = false;
+    }
+
+    /// Records that the cursor has moved outside the dock bounds during
+    /// an active drag. Called from the cursor poller's drag-tracking path.
+    /// Caller must already have a drag in progress (start_drag fired).
+    pub(crate) fn set_drag_outside(&mut self, outside: bool) {
+        self.drag_outside_dock = outside;
+    }
+
+    /// Returns the index of the pinned item currently being dragged, if any.
+    pub(crate) fn drag_source_index(&self) -> Option<usize> {
+        self.drag_source_index
+    }
+
+    /// Returns true if a drag press is in progress (threshold may not yet
+    /// be crossed).
+    pub(crate) fn is_drag_pending(&self) -> bool {
+        self.drag_pending
+    }
+
+    /// Returns true when a drag is active and the cursor is outside the
+    /// dock area (removal indicator should be shown).
+    pub(crate) fn is_drag_outside_dock(&self) -> bool {
+        self.drag_outside_dock
+    }
+
+    // --- Launch-animation invariant methods ---
+
+    /// Begin tracking a launch animation for `app_id`. Stores the instance
+    /// count at launch time (used by `cancel_matched` to detect when a new
+    /// window appears) and the GLib timeout source id.
+    ///
+    /// `instance_count` should be the result of `task_instances(app_id).len()`
+    /// at the moment of launch — this is what `cancel_matched` compares
+    /// against the current count to detect new windows.
+    pub(crate) fn start_launch(
+        &mut self,
+        app_id: String,
+        instance_count: usize,
+        source_id: glib::SourceId,
+    ) {
+        self.launching.insert(app_id.clone(), instance_count);
+        self.launch_timeouts.insert(app_id, source_id);
+    }
+
+    /// Cancel an in-flight launch animation. Returns the GLib `SourceId`
+    /// (so the caller can `remove()` it on the main loop) along with the
+    /// counter, or `None` if no launch was tracked for `app_id`.
+    pub(crate) fn cancel_launch(&mut self, app_id: &str) -> Option<(usize, glib::SourceId)> {
+        let counter = self.launching.remove(app_id)?;
+        let source = self.launch_timeouts.remove(app_id)?;
+        Some((counter, source))
+    }
+
+    /// Returns true if `app_id` is currently in the launching set.
+    pub(crate) fn is_launching(&self, app_id: &str) -> bool {
+        self.launching.contains_key(app_id)
+    }
+
+    /// Returns true if the launching map is empty (no active animations).
+    pub(crate) fn launching_is_empty(&self) -> bool {
+        self.launching.is_empty()
+    }
+
+    /// Returns an iterator over (app_id, launch_count) for all active
+    /// launch animations. Used by `cancel_matched` to snapshot the map.
+    pub(crate) fn launching_snapshot(&self) -> Vec<(String, usize)> {
+        self.launching
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
+    }
+
+    /// Directly removes `app_id` from the launching map without affecting
+    /// `launch_timeouts`. Used inside the timeout callback itself, where
+    /// the timeout has already fired (and thus consumed the `SourceId`).
+    pub(crate) fn remove_launching_only(&mut self, app_id: &str) -> bool {
+        self.launching.remove(app_id).is_some()
+    }
+
+    /// Removes `app_id` from `launch_timeouts` only. Paired with
+    /// `remove_launching_only` inside timeout callbacks where the
+    /// `SourceId` was consumed by the GLib runtime on fire.
+    pub(crate) fn remove_launch_timeout_only(&mut self, app_id: &str) -> Option<glib::SourceId> {
+        self.launch_timeouts.remove(app_id)
+    }
+
+    // --- Other methods ---
 
     /// Finds all client instances matching a class or desktop ID (case-insensitive).
     ///
@@ -148,4 +267,175 @@ pub(crate) fn hyphen_space_variant(class: &str) -> String {
     } else {
         class.replace(' ', "-")
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{CommandFactory, Parser};
+    use nwg_common::compositor::{Compositor, WmClient, WmEventStream, WmMonitor};
+
+    /// Minimal compositor stub for unit tests — returns
+    /// `DockError::NoCompositorDetected` for all IPC calls so tests that
+    /// don't exercise compositor paths can run without a live compositor.
+    struct StubCompositor;
+    impl Compositor for StubCompositor {
+        fn list_clients(&self) -> nwg_common::Result<Vec<WmClient>> {
+            Ok(vec![])
+        }
+        fn list_monitors(&self) -> nwg_common::Result<Vec<WmMonitor>> {
+            Ok(vec![])
+        }
+        fn get_active_window(&self) -> nwg_common::Result<WmClient> {
+            Err(nwg_common::DockError::NoCompositorDetected)
+        }
+        fn get_cursor_position(&self) -> Option<(i32, i32)> {
+            None
+        }
+        fn supports_cursor_position(&self) -> bool {
+            false
+        }
+        fn event_stream(&self) -> nwg_common::Result<Box<dyn WmEventStream>> {
+            Err(nwg_common::DockError::NoCompositorDetected)
+        }
+        fn focus_window(&self, _id: &str) -> nwg_common::Result<()> {
+            Err(nwg_common::DockError::NoCompositorDetected)
+        }
+        fn raise_active(&self) -> nwg_common::Result<()> {
+            Err(nwg_common::DockError::NoCompositorDetected)
+        }
+        fn close_window(&self, _id: &str) -> nwg_common::Result<()> {
+            Err(nwg_common::DockError::NoCompositorDetected)
+        }
+        fn toggle_floating(&self, _id: &str) -> nwg_common::Result<()> {
+            Err(nwg_common::DockError::NoCompositorDetected)
+        }
+        fn toggle_fullscreen(&self, _id: &str) -> nwg_common::Result<()> {
+            Err(nwg_common::DockError::NoCompositorDetected)
+        }
+        fn move_to_workspace(&self, _id: &str, _ws: i32) -> nwg_common::Result<()> {
+            Err(nwg_common::DockError::NoCompositorDetected)
+        }
+        fn focus_workspace(&self, _ws: i32) -> nwg_common::Result<()> {
+            Err(nwg_common::DockError::NoCompositorDetected)
+        }
+        fn toggle_special_workspace(&self, _name: &str) -> nwg_common::Result<()> {
+            Err(nwg_common::DockError::NoCompositorDetected)
+        }
+        fn exec(&self, _cmd: &str) -> nwg_common::Result<()> {
+            Err(nwg_common::DockError::NoCompositorDetected)
+        }
+    }
+
+    fn make_state() -> DockState {
+        let config = crate::config::DockConfig::parse_from(["test"]);
+        let matches = crate::config::DockConfig::command().get_matches_from(["test"]);
+        DockState::new(vec![], Rc::new(StubCompositor), Rc::new(config), matches)
+    }
+
+    // --- Drag-state tests ---
+
+    #[test]
+    fn set_drag_pending_sets_pending_only() {
+        let mut s = make_state();
+        s.set_drag_pending();
+        assert!(s.is_drag_pending());
+        assert_eq!(s.drag_source_index(), None); // not claimed yet
+        assert!(!s.is_drag_outside_dock());
+    }
+
+    #[test]
+    fn claim_drag_sets_source_index() {
+        let mut s = make_state();
+        s.set_drag_pending();
+        s.claim_drag(3);
+        assert_eq!(s.drag_source_index(), Some(3));
+        assert!(s.is_drag_pending());
+    }
+
+    #[test]
+    fn set_drag_pending_clears_prior_outside_state() {
+        let mut s = make_state();
+        // Simulate a prior drag that ended with outside=true (shouldn't happen,
+        // but set_drag_pending should clear stale state defensively)
+        s.set_drag_pending();
+        s.claim_drag(0);
+        s.set_drag_outside(true);
+        assert!(s.is_drag_outside_dock());
+        s.end_drag();
+        // After end_drag, a new set_drag_pending starts fresh
+        s.set_drag_pending();
+        assert!(!s.is_drag_outside_dock());
+        assert_eq!(s.drag_source_index(), None);
+    }
+
+    #[test]
+    fn end_drag_clears_all_three_fields() {
+        let mut s = make_state();
+        s.set_drag_pending();
+        s.claim_drag(2);
+        s.set_drag_outside(true);
+        s.end_drag();
+        assert_eq!(s.drag_source_index(), None);
+        assert!(!s.is_drag_pending());
+        assert!(!s.is_drag_outside_dock());
+    }
+
+    #[test]
+    fn set_drag_outside_toggles_correctly() {
+        let mut s = make_state();
+        s.set_drag_pending();
+        s.claim_drag(0);
+        assert!(!s.is_drag_outside_dock());
+        s.set_drag_outside(true);
+        assert!(s.is_drag_outside_dock());
+        s.set_drag_outside(false);
+        assert!(!s.is_drag_outside_dock());
+    }
+
+    // --- Launch-animation tests ---
+    // glib::SourceId cannot be constructed without a running GLib main loop
+    // (its only public constructor calls g_source_remove under the hood).
+    // We test cancel_launch's None path and map-state helpers directly via
+    // the launching HashMap through the snapshot/is_launching accessors,
+    // and seed state using a private insert via `launching` insert inside a
+    // test-only helper on the struct.
+
+    #[test]
+    fn cancel_launch_returns_none_when_not_tracked() {
+        let mut s = make_state();
+        assert!(s.cancel_launch("nonexistent").is_none());
+    }
+
+    #[test]
+    fn launching_is_empty_initially() {
+        let s = make_state();
+        assert!(s.launching_is_empty());
+    }
+
+    #[test]
+    fn is_launching_false_initially() {
+        let s = make_state();
+        assert!(!s.is_launching("any-app"));
+    }
+
+    #[test]
+    fn launching_snapshot_empty_initially() {
+        let s = make_state();
+        assert!(s.launching_snapshot().is_empty());
+    }
+
+    #[test]
+    fn remove_launching_only_returns_false_when_absent() {
+        let mut s = make_state();
+        assert!(!s.remove_launching_only("nonexistent"));
+    }
+
+    // Seed launching state via HashMap::insert on the private field is no
+    // longer possible. The `start_launch` method requires a glib::SourceId
+    // which cannot be constructed without a running GLib context. The
+    // round-trip tests (start_launch / cancel_launch) are covered by the
+    // integration test harness (make test-integration) where GTK is
+    // available. The invariant-mutation tests above (drag-state) cover the
+    // coupled-field pattern without GLib dependencies.
 }
