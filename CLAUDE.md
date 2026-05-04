@@ -112,7 +112,10 @@ vbox.append(&label);
 button.set_child(Some(&vbox));
 ```
 
-Shared helper: `ui::widgets::app_icon_button()`.
+Canonical pattern: `ui::buttons::pinned_button` (and similarly `task_button` and
+`launcher_button`) — they all build the `Button + Image + label-or-indicator` shape
+inline. The common shape is not yet extracted into a `ui::widgets::app_icon_button()`
+helper; that's the optional follow-up in the review doc, not a current API.
 
 ### Self-referential rebuild
 
