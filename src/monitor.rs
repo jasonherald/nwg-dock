@@ -6,7 +6,7 @@ use std::collections::HashMap;
 ///
 /// Uses `gdk::Monitor::connector()` for stable name-based mapping
 /// instead of index-based mapping (which drifts on monitor hotplug).
-pub fn map_outputs_by_connector() -> HashMap<String, gdk::Monitor> {
+fn map_outputs_by_connector() -> HashMap<String, gdk::Monitor> {
     let mut result = HashMap::new();
     let Some(display) = gdk::Display::default() else {
         log::error!("No default GDK display");
@@ -29,7 +29,7 @@ pub fn map_outputs_by_connector() -> HashMap<String, gdk::Monitor> {
 /// Returns (output_name, gdk_monitor) pairs. Logs a warning if `-o` targets
 /// an unknown output. Use `resolve_monitors_quiet` for hot paths (liveness
 /// tick) where repeated warnings would spam the log.
-pub fn resolve_monitors(config: &crate::config::DockConfig) -> Vec<(String, gdk::Monitor)> {
+pub(crate) fn resolve_monitors(config: &crate::config::DockConfig) -> Vec<(String, gdk::Monitor)> {
     resolve_monitors_inner(config, true)
 }
 
@@ -38,7 +38,9 @@ pub fn resolve_monitors(config: &crate::config::DockConfig) -> Vec<(String, gdk:
 /// if the user's `--output` target is mistyped or temporarily unavailable.
 /// The startup/reconcile path still uses the loud variant so the warning
 /// surfaces once per real topology change.
-pub fn resolve_monitors_quiet(config: &crate::config::DockConfig) -> Vec<(String, gdk::Monitor)> {
+pub(crate) fn resolve_monitors_quiet(
+    config: &crate::config::DockConfig,
+) -> Vec<(String, gdk::Monitor)> {
     resolve_monitors_inner(config, false)
 }
 

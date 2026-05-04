@@ -116,7 +116,7 @@ fn needs_rebuild(state: &Rc<RefCell<DockState>>) -> bool {
 /// and triggers UI refreshes on the main thread via polling.
 /// Only rebuilds if the client list actually changed (different count
 /// or different set of classes).
-pub fn start_event_listener(
+pub(crate) fn start_event_listener(
     state: Rc<RefCell<DockState>>,
     rebuild_fn: Rc<dyn Fn()>,
     compositor: &dyn Compositor,

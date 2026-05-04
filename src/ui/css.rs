@@ -87,7 +87,7 @@ window {{
 
 /// Loads the dock's CSS file and applies GTK4 compatibility overrides.
 /// Starts a file watcher for hot-reload of the user CSS.
-pub fn load_dock_css(css_path: &Path, opacity: u8) {
+pub(crate) fn load_dock_css(css_path: &Path, opacity: u8) {
     let user_provider = css::load_css(css_path);
     css::watch_css(css_path, &user_provider);
     // GTK4 button overrides as embedded defaults — user CSS can override via hot-reload

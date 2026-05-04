@@ -97,7 +97,7 @@ fn scale_icon_size(item_count: usize, config: &DockConfig) -> i32 {
 /// Builds the main dock content box with pinned and task buttons.
 ///
 /// This is the core UI builder, called on every refresh.
-pub fn build(
+pub(crate) fn build(
     alignment_box: &gtk4::Box,
     ctx: &DockContext,
     win: &gtk4::ApplicationWindow,

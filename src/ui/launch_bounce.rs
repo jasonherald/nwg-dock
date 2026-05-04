@@ -7,7 +7,7 @@ use std::rc::Rc;
 /// Starts a launch bounce animation for the given app ID.
 /// Records the current instance count so cancel_matched can detect
 /// when a NEW window appears (not just an existing one).
-pub fn start(app_id: &str, state: &Rc<RefCell<DockState>>, rebuild: &Rc<dyn Fn()>) {
+pub(crate) fn start(app_id: &str, state: &Rc<RefCell<DockState>>, rebuild: &Rc<dyn Fn()>) {
     let id = app_id.to_lowercase();
     {
         let mut s = state.borrow_mut();
@@ -43,7 +43,7 @@ pub fn start(app_id: &str, state: &Rc<RefCell<DockState>>, rebuild: &Rc<dyn Fn()
 /// since the animation started. This correctly handles middle-click (new
 /// instance of an already-running app) — the bounce only clears when the
 /// NEW window appears, not because the app was already running.
-pub fn cancel_matched(state: &Rc<RefCell<DockState>>) -> bool {
+pub(crate) fn cancel_matched(state: &Rc<RefCell<DockState>>) -> bool {
     let mut s = state.borrow_mut();
     if s.launching.is_empty() {
         return false;

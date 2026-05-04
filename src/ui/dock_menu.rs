@@ -7,7 +7,7 @@ use std::rc::Rc;
 const LOCK_FILE: &str = "mac-dock-locked";
 
 /// Shows the dock background context menu at the click position.
-pub fn show_dock_background_menu(
+pub(crate) fn show_dock_background_menu(
     state: &Rc<RefCell<DockState>>,
     rebuild: &Rc<dyn Fn()>,
     parent: &impl IsA<gtk4::Widget>,
@@ -55,7 +55,7 @@ pub fn show_dock_background_menu(
 }
 
 /// Loads the lock state from cache.
-pub fn load_lock_state() -> bool {
+pub(crate) fn load_lock_state() -> bool {
     let path = lock_file_path();
     std::fs::read_to_string(path).is_ok_and(|s| s.trim() == "true") // default: unlocked
 }

@@ -18,7 +18,7 @@ use std::rc::{Rc, Weak};
 /// which previously left ghost widgets in `alignment_box`. The guard
 /// turns recursive calls into a "pending" flag and re-runs once the
 /// current rebuild finishes.
-pub fn create_rebuild_fn(
+pub(crate) fn create_rebuild_fn(
     per_monitor: &Rc<RefCell<Vec<MonitorDock>>>,
     state: &Rc<RefCell<DockState>>,
     data_home: &Rc<std::path::PathBuf>,

@@ -19,14 +19,14 @@ const LEGACY_FLAGS: &[&str] = &[
 ];
 
 /// Converts Go-style single-dash flags to clap-compatible double-dash flags.
-pub fn normalize_legacy_flags(args: impl Iterator<Item = String>) -> Vec<String> {
+pub(crate) fn normalize_legacy_flags(args: impl Iterator<Item = String>) -> Vec<String> {
     nwg_common::config::flags::normalize_legacy_flags(args, LEGACY_FLAGS)
 }
 
 /// Dock position on screen edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Position {
+pub(crate) enum Position {
     Bottom,
     Top,
     Left,
@@ -36,7 +36,7 @@ pub enum Position {
 /// Content alignment within the dock.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Alignment {
+pub(crate) enum Alignment {
     Start,
     Center,
     End,
@@ -45,7 +45,7 @@ pub enum Alignment {
 /// Layer-shell layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum Layer {
+pub(crate) enum Layer {
     Overlay,
     Top,
     Bottom,
@@ -54,118 +54,118 @@ pub enum Layer {
 /// A macOS-style dock for Hyprland/Sway.
 #[derive(Parser, Debug, Clone)]
 #[command(name = "nwg-dock", version, about)]
-pub struct DockConfig {
+pub(crate) struct DockConfig {
     /// Alignment in full width/height
     #[arg(short = 'a', long, value_enum, default_value_t = Alignment::Center)]
-    pub alignment: Alignment,
+    pub(crate) alignment: Alignment,
 
     /// Auto-hide: show dock when hotspot hovered, close when left or button clicked
     #[arg(short = 'd', long)]
-    pub autohide: bool,
+    pub(crate) autohide: bool,
 
     /// CSS file name
     #[arg(short = 's', long, default_value = "style.css")]
-    pub css_file: String,
+    pub(crate) css_file: String,
 
     /// Turn on debug messages
     #[arg(long)]
-    pub debug: bool,
+    pub(crate) debug: bool,
 
     /// Set exclusive zone: move other windows aside
     #[arg(short = 'x', long)]
-    pub exclusive: bool,
+    pub(crate) exclusive: bool,
 
     /// Take full screen width/height
     #[arg(short = 'f', long)]
-    pub full: bool,
+    pub(crate) full: bool,
 
     /// Quote-delimited, space-separated class list to ignore in the dock
     #[arg(short = 'g', long, default_value = "")]
-    pub ignore_classes: String,
+    pub(crate) ignore_classes: String,
 
     /// Hotspot delay in ms (smaller = faster trigger to show)
     #[arg(long, alias = "hd", default_value_t = 20)]
-    pub hotspot_delay: i64,
+    pub(crate) hotspot_delay: i64,
 
     /// Hotspot layer
     #[arg(long, alias = "hl", value_enum, default_value_t = Layer::Overlay)]
-    pub hotspot_layer: Layer,
+    pub(crate) hotspot_layer: Layer,
 
     /// Auto-hide timeout in ms (how long after cursor leaves before dock hides)
     #[arg(long, default_value_t = 600)]
-    pub hide_timeout: u64,
+    pub(crate) hide_timeout: u64,
 
     /// Alternative name or path for the launcher icon
     #[arg(long, default_value = "")]
-    pub ico: String,
+    pub(crate) ico: String,
 
     /// Ignore running apps on these workspaces (comma-separated names/ids)
     #[arg(long, alias = "iw", default_value = "")]
-    pub ignore_workspaces: String,
+    pub(crate) ignore_workspaces: String,
 
     /// Icon size in pixels
     #[arg(short = 'i', long, default_value_t = 48)]
-    pub icon_size: i32,
+    pub(crate) icon_size: i32,
 
     /// Command assigned to the launcher button
     #[arg(short = 'c', long, default_value = "nwg-drawer")]
-    pub launcher_cmd: String,
+    pub(crate) launcher_cmd: String,
 
     /// Launcher button position
     #[arg(long, alias = "lp", value_enum, default_value_t = Alignment::End)]
-    pub launcher_pos: Alignment,
+    pub(crate) launcher_pos: Alignment,
 
     /// Layer-shell layer
     #[arg(short = 'l', long, value_enum, default_value_t = Layer::Overlay)]
-    pub layer: Layer,
+    pub(crate) layer: Layer,
 
     /// Margin bottom
     #[arg(long, default_value_t = 0)]
-    pub mb: i32,
+    pub(crate) mb: i32,
 
     /// Margin left
     #[arg(long, default_value_t = 0)]
-    pub ml: i32,
+    pub(crate) ml: i32,
 
     /// Margin right
     #[arg(long, default_value_t = 0)]
-    pub mr: i32,
+    pub(crate) mr: i32,
 
     /// Margin top
     #[arg(long, default_value_t = 0)]
-    pub mt: i32,
+    pub(crate) mt: i32,
 
     /// Don't show the launcher button
     #[arg(long)]
-    pub nolauncher: bool,
+    pub(crate) nolauncher: bool,
 
     /// Number of workspaces you use
     #[arg(short = 'w', long, default_value_t = 5)]
-    pub num_ws: i32,
+    pub(crate) num_ws: i32,
 
     /// Position on screen edge
     #[arg(short = 'p', long, value_enum, default_value_t = Position::Bottom)]
-    pub position: Position,
+    pub(crate) position: Position,
 
     /// Leave the program resident, but without hotspot
     #[arg(short = 'r', long)]
-    pub resident: bool,
+    pub(crate) resident: bool,
 
     /// Name of output to display the dock on
     #[arg(short = 'o', long, default_value = "")]
-    pub output: String,
+    pub(crate) output: String,
 
     /// Allow multiple instances of the dock
     #[arg(short = 'm', long)]
-    pub multi: bool,
+    pub(crate) multi: bool,
 
     /// Window background opacity 0-100 (default: 100, fully opaque)
     #[arg(long, default_value_t = 100)]
-    pub opacity: u8,
+    pub(crate) opacity: u8,
 
     /// Show a bounce animation on dock icons while an app is launching
     #[arg(long)]
-    pub launch_animation: bool,
+    pub(crate) launch_animation: bool,
 
     /// Show the workspace switcher row between pinned and tasks.
     /// Default off; opt-in via `--ws`. The Go nwg-dock defaults this
@@ -173,41 +173,41 @@ pub struct DockConfig {
     /// unless they explicitly enable it. See README "Deviations from
     /// Go nwg-dock" for the rationale.
     #[arg(long)]
-    pub ws: bool,
+    pub(crate) ws: bool,
 
     /// Disable fullscreen suppression (allow dock hotspot on fullscreen monitors)
     #[arg(long)]
-    pub no_fullscreen_suppress: bool,
+    pub(crate) no_fullscreen_suppress: bool,
 
     /// Window manager override (auto-detected from environment if not specified)
     #[arg(long, value_enum)]
-    pub wm: Option<nwg_common::compositor::WmOverride>,
+    pub(crate) wm: Option<nwg_common::compositor::WmOverride>,
 
     /// Path to a TOML config file. Overrides the XDG default location
     /// (`$XDG_CONFIG_HOME/nwg-dock-hyprland/config.toml`). See
     /// `data/nwg-dock-hyprland/config.example.toml` for the schema.
     #[arg(long, value_name = "PATH")]
-    pub config: Option<PathBuf>,
+    pub(crate) config: Option<PathBuf>,
 
     /// Print the effective merged config (CLI + file + defaults) to stdout
     /// and exit. Useful for verifying which fields came from where.
     #[arg(long)]
-    pub print_config: bool,
+    pub(crate) print_config: bool,
 }
 
 impl DockConfig {
     /// Whether the dock orientation is vertical (left/right position).
-    pub fn is_vertical(&self) -> bool {
+    pub(crate) fn is_vertical(&self) -> bool {
         matches!(self.position, Position::Left | Position::Right)
     }
 
     /// Whether this is a resident-mode dock (autohide or resident flag).
-    pub fn is_resident_mode(&self) -> bool {
+    pub(crate) fn is_resident_mode(&self) -> bool {
         self.autohide || self.resident
     }
 
     /// Returns ignored workspace names/ids as a list.
-    pub fn ignored_workspaces(&self) -> Vec<String> {
+    pub(crate) fn ignored_workspaces(&self) -> Vec<String> {
         if self.ignore_workspaces.is_empty() {
             Vec::new()
         } else {
@@ -219,7 +219,7 @@ impl DockConfig {
     }
 
     /// Returns ignored classes as a list.
-    pub fn ignored_classes(&self) -> Vec<String> {
+    pub(crate) fn ignored_classes(&self) -> Vec<String> {
         if self.ignore_classes.is_empty() {
             Vec::new()
         } else {

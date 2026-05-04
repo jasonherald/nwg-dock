@@ -9,7 +9,7 @@ use nwg_common::compositor::Compositor;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub use hotspot_windows::HotspotContext;
+pub(crate) use hotspot_windows::HotspotContext;
 
 /// Shows the dock on the named monitor and hides it on all others.
 /// Bails out if the target isn't a dock-managed output (e.g., -o flag filters to one monitor).
@@ -36,7 +36,7 @@ pub(super) fn show_on_monitor_only_by_name(
 ///
 /// Returns a `HotspotContext` for the Sway path, which reconciliation uses
 /// to create hotspot windows for hotplugged monitors.
-pub fn setup_autohide(
+pub(crate) fn setup_autohide(
     per_monitor: &Rc<RefCell<Vec<MonitorDock>>>,
     config: &DockConfig,
     state: &Rc<RefCell<DockState>>,

@@ -43,7 +43,7 @@ struct DragSession {
 /// competition: click without movement → app launches normally;
 /// drag past threshold → reorder begins, click is suppressed.
 /// Attaches manual drag-to-reorder on the item_box (parent of the button).
-pub fn setup_drag_gesture(
+pub(crate) fn setup_drag_gesture(
     button: &gtk4::Button,
     index: usize,
     vertical: bool,
