@@ -83,6 +83,14 @@ fn collect_unknown_keys(value: &toml::Value) -> Vec<String> {
 
     let mut unknowns = Vec::new();
     for (section_name, section_value) in root {
+        // SYNC: these per-section allowlists must match the kebab-case
+        // serde renames on the matching struct in `schema.rs`. Adding a
+        // new field there without updating this match means the field
+        // gets logged as "unknown" on every load (warn-level noise but
+        // not a load failure). Drift is silent — the only signal is a
+        // user reporting log spam. Future hardening: derive these from
+        // serde's introspection or expose a `pub(super) const` array
+        // from each section type.
         let known_keys: &[&str] = match section_name.as_str() {
             "behavior" => &[
                 "autohide",
