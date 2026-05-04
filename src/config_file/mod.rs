@@ -60,10 +60,24 @@ impl std::fmt::Display for ConfigError {
                 key,
                 error_debug,
                 error_message,
-            } => write!(
-                f,
-                "invalid value for {section}.{key}: '{error_debug}' — expected {error_message}"
-            ),
+            } => {
+                // Empty key is the "section-level error" signal from
+                // load.rs (e.g., `layout = "bad"` — the section itself
+                // is the wrong type). Drop the trailing dot+key so the
+                // message reads "invalid value for layout" rather than
+                // the awkward "invalid value for layout.".
+                if key.is_empty() {
+                    write!(
+                        f,
+                        "invalid value for {section}: '{error_debug}' — expected {error_message}"
+                    )
+                } else {
+                    write!(
+                        f,
+                        "invalid value for {section}.{key}: '{error_debug}' — expected {error_message}"
+                    )
+                }
+            }
             ConfigError::IoError(e) => write!(f, "{e}"),
         }
     }

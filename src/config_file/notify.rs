@@ -28,8 +28,15 @@ pub(crate) struct TestNotifierGuard {
 #[cfg(test)]
 impl Drop for TestNotifierGuard {
     fn drop(&mut self) {
-        if let Ok(mut slot) = notifier_slot().lock() {
-            *slot = self.previous.take();
+        match notifier_slot().lock() {
+            Ok(mut slot) => *slot = self.previous.take(),
+            // Poisoned mutex implies an earlier panic in another thread
+            // while it held the slot — almost certainly the test that
+            // is now unwinding through our Drop. Log so the failure
+            // leaves a trace; don't panic from a destructor.
+            Err(_) => log::warn!(
+                "TestNotifierGuard::drop: notifier slot mutex is poisoned; previous notifier not restored"
+            ),
         }
     }
 }

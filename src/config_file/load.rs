@@ -12,15 +12,25 @@ use super::schema::RawConfigFile;
 pub(crate) fn load_config_file(
     path: &std::path::Path,
 ) -> Result<Option<RawConfigFile>, ConfigError> {
-    if !path.exists() {
-        log::debug!(
-            "Config file {} does not exist; using CLI + defaults",
-            path.display()
-        );
-        return Ok(None);
-    }
-
-    let content = std::fs::read_to_string(path).map_err(ConfigError::IoError)?;
+    // Read the file directly and treat ONLY ErrorKind::NotFound as the
+    // "use CLI + defaults" path. The previous shape used `path.exists()`
+    // as a pre-check, which collapses every metadata failure (permission
+    // denied, broken symlink, EIO, etc.) into `false` — an unreadable
+    // config would silently fall back to defaults, hiding the real
+    // problem from the user. Matching on `read_to_string` directly
+    // surfaces the genuine I/O error to the caller and also closes the
+    // TOCTOU window between the existence check and the read.
+    let content = match std::fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            log::debug!(
+                "Config file {} does not exist; using CLI + defaults",
+                path.display()
+            );
+            return Ok(None);
+        }
+        Err(err) => return Err(ConfigError::IoError(err)),
+    };
     // Strip optional UTF-8 BOM so the toml parser doesn't choke on it.
     let content = content.strip_prefix('\u{feff}').unwrap_or(&content);
 
@@ -41,11 +51,26 @@ pub(crate) fn load_config_file(
         .map_err(|err| {
             let err_path = err.path().to_string();
             let inner = err.into_inner();
-            // Path looks like "behavior.hide-timeout" or "filters.ignore-classes".
-            // Split on first '.' to get section + key.
+            // Path shapes serde_path_to_error can hand us:
+            // - "behavior.hide-timeout"  → field-level error inside a section
+            // - "layout"                 → section-level error (e.g. user wrote
+            //                              `layout = "bad"` instead of `[layout]…`)
+            // - "unknown-name"           → root-level scalar that isn't a known section
+            // Field-level: split on the first '.'. Section-level: the path
+            // matches a known section name with no dot. Otherwise: root.
             let (section, key) = match err_path.split_once('.') {
                 Some((s, k)) => (section_label(s), k.to_string()),
-                None => ("(root)", err_path),
+                None => {
+                    let label = section_label(&err_path);
+                    if label == "(unknown)" {
+                        ("(root)", err_path)
+                    } else {
+                        // Empty key signals "the section type itself was wrong".
+                        // The Display impl on ConfigError omits the dot+key
+                        // when key is empty so the message reads naturally.
+                        (label, String::new())
+                    }
+                }
             };
             ConfigError::InvalidValue {
                 section,
@@ -185,6 +210,28 @@ mod tests {
     }
 
     #[test]
+    fn config_error_invalid_value_display_omits_dot_when_key_empty() {
+        // Empty key signals a section-level error (the section type
+        // itself was wrong). Display should drop the trailing dot
+        // rather than rendering "invalid value for layout."
+        let ce = ConfigError::InvalidValue {
+            section: "layout",
+            key: String::new(),
+            error_debug: "string".into(),
+            error_message: "table".into(),
+        };
+        let display = format!("{ce}");
+        assert!(
+            display.contains("invalid value for layout:"),
+            "got: {display}"
+        );
+        assert!(
+            !display.contains("layout."),
+            "trailing dot should be omitted, got: {display}"
+        );
+    }
+
+    #[test]
     fn config_error_io_display() {
         let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "missing");
         let ce = ConfigError::IoError(io_err);
@@ -232,6 +279,28 @@ mod tests {
             ConfigError::InvalidValue { section, key, .. } => {
                 assert_eq!(section, "layout");
                 assert_eq!(key, "position");
+            }
+            other => panic!("expected InvalidValue, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn load_attributes_section_level_type_error_to_section() {
+        // User wrote `layout = "bad"` instead of `[layout] ...` —
+        // the entire section's type is wrong. serde_path_to_error
+        // hands us a path of just "layout" with no dot, which the
+        // earlier code mis-attributed to "(root).layout". The fix
+        // recognizes the path as a known section and reports it
+        // with the section attribution and an empty key.
+        let f = temp_config(r#"layout = "bad""#);
+        let err = load_config_file(f.path()).unwrap_err();
+        match err {
+            ConfigError::InvalidValue { section, key, .. } => {
+                assert_eq!(section, "layout", "should attribute to the layout section");
+                assert!(
+                    key.is_empty(),
+                    "section-level error should have empty key, got: {key:?}"
+                );
             }
             other => panic!("expected InvalidValue, got {other:?}"),
         }
