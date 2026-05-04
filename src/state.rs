@@ -127,8 +127,15 @@ impl DockState {
     }
 
     /// Claims the drag by recording the source index. Called from
-    /// drag_update after the movement threshold is crossed.
+    /// drag_update after the movement threshold is crossed. No-op if
+    /// `drag_pending` is false — that guards against a late callback
+    /// after `end_drag` has cleared the outer phase from resurrecting
+    /// `Some(idx)` with `drag_pending = false`, which the invariants
+    /// declare an impossible state.
     pub(crate) fn claim_drag(&mut self, idx: usize) {
+        if !self.drag_pending {
+            return;
+        }
         self.drag_source_index = Some(idx);
     }
 
@@ -141,9 +148,15 @@ impl DockState {
     }
 
     /// Records that the cursor has moved outside the dock bounds during
-    /// an active drag. Called from the cursor poller's drag-tracking path.
-    /// Caller must already have a drag in progress (start_drag fired).
+    /// an active drag. Called from the cursor poller's drag-tracking path
+    /// while `set_drag_pending` has already fired. No-op if `drag_pending`
+    /// is false — same defensive reason as `claim_drag`: a late poller
+    /// tick after `end_drag` shouldn't be able to set `outside = true`
+    /// with the outer phase already cleared.
     pub(crate) fn set_drag_outside(&mut self, outside: bool) {
+        if !self.drag_pending {
+            return;
+        }
         self.drag_outside_dock = outside;
     }
 
@@ -180,22 +193,40 @@ impl DockState {
         source_id: glib::SourceId,
     ) {
         self.launching.insert(app_id.clone(), instance_count);
-        self.launch_timeouts.insert(app_id, source_id);
+        // If a prior launch was still tracked for this app (double-click
+        // before the previous animation cleared), the displaced
+        // `SourceId` must be `.remove()`'d explicitly — `glib::SourceId`
+        // has no `Drop` impl, so dropping it leaks the underlying GLib
+        // timer and the stale callback would still fire later, clearing
+        // the wrong launch.
+        if let Some(displaced) = self.launch_timeouts.insert(app_id, source_id) {
+            displaced.remove();
+        }
     }
 
     /// Cancel an in-flight launch animation. Returns the GLib `SourceId`
     /// (so the caller can `remove()` it on the main loop) along with the
     /// counter, or `None` if no launch was tracked for `app_id`.
     ///
-    /// Both maps are cleared unconditionally so that under any invariant
-    /// violation (only one map carrying `app_id`) the call still leaves
-    /// the state consistent — the previous sequential `?` shape would
-    /// have stripped `launching` while leaving `launch_timeouts` orphaned
-    /// if the maps had ever diverged.
+    /// Both maps are cleared unconditionally and any orphaned `SourceId`
+    /// found in the divergent case (only `launch_timeouts` had the entry
+    /// — `start_launch`'s atomic writes prevent this today, but the
+    /// shape can't depend on that) is `.remove()`'d directly so the
+    /// underlying GLib timer is cancelled and not leaked. The previous
+    /// `counter.zip(source)` shape would have silently dropped that
+    /// orphaned `SourceId`, leaving a phantom timer that would fire
+    /// later against unrelated state.
     pub(crate) fn cancel_launch(&mut self, app_id: &str) -> Option<(usize, glib::SourceId)> {
         let counter = self.launching.remove(app_id);
         let source = self.launch_timeouts.remove(app_id);
-        counter.zip(source)
+        match (counter, source) {
+            (Some(c), Some(s)) => Some((c, s)),
+            (None, Some(orphan)) => {
+                orphan.remove();
+                None
+            }
+            _ => None,
+        }
     }
 
     /// Returns true if `app_id` is currently in the launching set.
@@ -425,6 +456,35 @@ mod tests {
         assert!(s.is_drag_outside_dock());
         s.set_drag_outside(false);
         assert!(!s.is_drag_outside_dock());
+    }
+
+    #[test]
+    fn claim_drag_noop_when_not_pending() {
+        // Simulates a late drag-update callback firing after `end_drag`
+        // already cleared the outer phase. Without the guard, this would
+        // resurrect `drag_source_index = Some(idx)` with `drag_pending =
+        // false` — an impossible resting state per the invariants.
+        let mut s = make_state();
+        s.claim_drag(7);
+        assert_eq!(
+            s.drag_source_index(),
+            None,
+            "claim_drag must no-op when drag_pending is false"
+        );
+        assert!(!s.is_drag_pending());
+    }
+
+    #[test]
+    fn set_drag_outside_noop_when_not_pending() {
+        // Same shape as claim_drag_noop_when_not_pending — late poller
+        // tick after `end_drag` shouldn't be able to set outside=true
+        // without the outer phase being active.
+        let mut s = make_state();
+        s.set_drag_outside(true);
+        assert!(
+            !s.is_drag_outside_dock(),
+            "set_drag_outside must no-op when drag_pending is false"
+        );
     }
 
     // --- Launch-animation tests ---
