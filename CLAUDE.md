@@ -87,7 +87,7 @@ data/ (or data/nwg-dock-hyprland/ in the monorepo)
 
 ## State borrowing conventions
 
-The dock shares `Rc<RefCell<DockState>>` across ~80+ borrow sites in the UI handlers. The pattern is load-bearing — several handlers explicitly `drop(s)` a `RefMut` before calling `rebuild()`, and the reentrancy guard in `rebuild.rs` (the "glycin pumps the main loop" comment at lines 38-43) exists because nested borrows of state via the rebuild closure caused real crashes in earlier versions.
+The dock shares `Rc<RefCell<DockState>>` across ~80+ borrow sites in the UI handlers. The pattern is load-bearing — several handlers explicitly `drop(s)` a `RefMut` before calling `rebuild()`, and the reentrancy guard in `rebuild.rs` (the `running` / `pending` `Cell<bool>` pair plus the "glycin pumping the main loop" comment inside the rebuild closure) exists because nested borrows of state via the rebuild closure caused real crashes in earlier versions.
 
 **Rules — follow them whenever you add or modify a UI handler:**
 
