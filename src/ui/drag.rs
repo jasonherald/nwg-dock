@@ -341,9 +341,6 @@ fn calculate_drop_index(
     vertical: bool,
     dragged: &gtk4::Widget,
 ) -> usize {
-    // Uses the children iterator but needs a filter predicate (skip dragged + non-pinned)
-    // and reads allocation data per child — slightly richer than a plain find_map, but
-    // the traversal itself benefits from the shared helper.
     let positions: Vec<f64> = crate::ui::widgets::children(dock_box)
         .filter(|w| w != dragged && w.has_css_class("pinned-item"))
         .map(|w| {
