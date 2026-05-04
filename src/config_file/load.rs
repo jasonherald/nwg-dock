@@ -76,7 +76,7 @@ fn section_label(name: &str) -> &'static str {
 /// the typed `RawConfigFile` schema. Used for forward-compat warnings —
 /// typos and future-version fields surface in the log without failing
 /// the load.
-pub(crate) fn collect_unknown_keys(value: &toml::Value) -> Vec<String> {
+fn collect_unknown_keys(value: &toml::Value) -> Vec<String> {
     let toml::Value::Table(root) = value else {
         return Vec::new();
     };

@@ -36,7 +36,7 @@ pub(crate) enum DiffResult {
 /// Computes which fields differ between `old` and `new`, classifying
 /// each as restart-required or hot-reloadable, and returns the
 /// appropriate `DiffResult`.
-pub(crate) fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
+fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
     let mut all_changed: Vec<&'static str> = Vec::new();
     let mut hot_reloadable: Vec<&'static str> = Vec::new();
 

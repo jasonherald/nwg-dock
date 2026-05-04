@@ -11,9 +11,11 @@ const DEFAULT_BG_ALPHA: f64 = 0.75;
 ///
 /// Compact buttons, transparent background, tight indicator spacing.
 /// Built dynamically so the background RGB stays in sync with
-/// `constants::DEFAULT_BG_RGB` (also referenced by the opacity reload
-/// path in `load_dock_css` below and `apply_config_change` in
-/// `config_file.rs`).
+/// `constants::DEFAULT_BG_RGB` — the dynamic opacity-rebuild path
+/// (`reload_opacity` below, called by both `load_dock_css` at cold
+/// start and `config_file::hot_reload::apply_hot_reloadable_changes`
+/// on opacity change) reads the same constant so the embedded default
+/// here can't drift from the runtime override.
 fn gtk4_compat_css() -> String {
     let (r, g, b) = DEFAULT_BG_RGB;
     format!(

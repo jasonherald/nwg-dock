@@ -94,7 +94,7 @@ pub(crate) fn merge(
     cli
 }
 
-pub(super) fn was_set_on_cli(matches: &clap::ArgMatches, id: &str) -> bool {
+fn was_set_on_cli(matches: &clap::ArgMatches, id: &str) -> bool {
     matches.value_source(id) == Some(clap::parser::ValueSource::CommandLine)
 }
 
