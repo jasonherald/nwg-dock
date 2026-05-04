@@ -209,16 +209,10 @@ fn apply_hot_reloadable_changes(
         }
     }
 
-    // Opacity: re-load the override CSS using the canonical default
-    // background RGB. Kept in sync with ui::css::load_dock_css.
+    // Opacity: delegate to ui::css::reload_opacity so the rgba(...)
+    // format string lives in exactly one place (CR-17).
     if old.opacity != new.opacity {
-        use crate::ui::constants::{DEFAULT_BG_RGB, OPACITY_PERCENT_MAX};
-        let alpha =
-            f64::from(new.opacity.min(OPACITY_PERCENT_MAX)) / f64::from(OPACITY_PERCENT_MAX);
-        let (r, g, b) = DEFAULT_BG_RGB;
-        let opacity_css =
-            format!("window {{ background-color: rgba({r}, {g}, {b}, {alpha:.2}); }}");
-        nwg_common::config::css::load_css_override(&opacity_css);
+        crate::ui::css::reload_opacity(new.opacity);
     }
 
     // debug: live log level swap.
@@ -234,16 +228,13 @@ fn apply_hot_reloadable_changes(
     // CSS file path: re-load from the new path. The existing CSS watcher
     // is bound to the original path; restarting the watcher on a new
     // path is out of scope for this PR (changing css-file mid-session
-    // is rare). load_css applies current contents from the new path.
+    // is rare). reload_css_file delegates to load_css and discards the
+    // provider per the fire-and-forget pattern (CR-12).
     if old.css_file != new.css_file {
         let config_dir = nwg_common::config::paths::config_dir("nwg-dock-hyprland");
         let new_css_path = config_dir.join(&new.css_file);
         if new_css_path.exists() {
-            // load_css() returns a CssProvider after applying the file;
-            // we don't need the handle (the existing watcher still owns
-            // the original provider), and load_css logs internally on
-            // failure rather than returning a Result.
-            nwg_common::config::css::load_css(&new_css_path);
+            crate::ui::css::reload_css_file(&new_css_path);
         }
     }
 }

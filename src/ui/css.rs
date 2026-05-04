@@ -85,6 +85,25 @@ window {{
     )
 }
 
+/// Re-applies the dock background's opacity by re-loading the
+/// override CSS. Used by both cold start (`load_dock_css`) and
+/// hot-reload (`config_file::hot_reload::apply_hot_reloadable_changes`)
+/// so the rgba(...) format string lives in exactly one place.
+pub(crate) fn reload_opacity(opacity: u8) {
+    let alpha = f64::from(opacity.min(OPACITY_PERCENT_MAX)) / f64::from(OPACITY_PERCENT_MAX);
+    let (r, g, b) = DEFAULT_BG_RGB;
+    let opacity_css = format!("window {{ background-color: rgba({r}, {g}, {b}, {alpha:.2}); }}");
+    css::load_css_override(&opacity_css);
+}
+
+/// Re-applies a user CSS file at runtime. The returned
+/// CssProvider is discarded — the existing CSS watcher (set up
+/// in `load_dock_css`) still owns the original provider, and
+/// `load_css` logs internally on failure.
+pub(crate) fn reload_css_file(path: &Path) {
+    css::load_css(path);
+}
+
 /// Loads the dock's CSS file and applies GTK4 compatibility overrides.
 /// Starts a file watcher for hot-reload of the user CSS.
 pub(crate) fn load_dock_css(css_path: &Path, opacity: u8) {
@@ -95,10 +114,7 @@ pub(crate) fn load_dock_css(css_path: &Path, opacity: u8) {
 
     // Apply user-configurable opacity — overrides embedded default but
     // user CSS file can still override this via hot-reload.
-    let alpha = f64::from(opacity.min(OPACITY_PERCENT_MAX)) / f64::from(OPACITY_PERCENT_MAX);
-    let (r, g, b) = DEFAULT_BG_RGB;
-    let opacity_css = format!("window {{ background-color: rgba({r}, {g}, {b}, {alpha:.2}); }}");
-    css::load_css_override(&opacity_css);
+    reload_opacity(opacity);
 
     // Launch bounce animation (issue #38) — dimensions from ui/constants.rs
     use super::constants::{
