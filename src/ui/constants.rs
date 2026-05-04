@@ -10,6 +10,13 @@ pub(crate) const DEFAULT_BG_RGB: (u8, u8, u8) = (54, 54, 79);
 /// Thickness of the Sway hotspot trigger window in pixels.
 pub(crate) const HOTSPOT_THICKNESS: i32 = 4;
 
+/// Near-zero alpha for the hotspot trigger window's CSS background.
+/// Just opaque enough that the compositor delivers input events to
+/// the surface (some compositors skip fully-transparent windows for
+/// hit-testing) but invisible to the user. Value is load-bearing —
+/// changing to 0.0 would break input delivery on those compositors.
+pub(crate) const HOTSPOT_INPUT_ALPHA: f64 = 0.01;
+
 /// Pixel margin beyond the dock bounds before a drag-off triggers unpin.
 pub(crate) const DRAG_OUTSIDE_MARGIN: f64 = 30.0;
 
@@ -55,13 +62,6 @@ pub(crate) const INDICATOR_DIVISOR: i32 = 8;
 /// paths can't drift. Will move alongside the alpha computation when
 /// CR-2026-05-03-17 consolidates the CSS-reload logic into `ui::css`.
 pub(crate) const OPACITY_PERCENT_MAX: u8 = 100;
-
-/// Near-zero alpha for the hotspot trigger window's CSS background.
-/// Just opaque enough that the compositor delivers input events to
-/// the surface (some compositors skip fully-transparent windows for
-/// hit-testing) but invisible to the user. Value is load-bearing —
-/// changing to 0.0 would break input delivery on those compositors.
-pub(crate) const HOTSPOT_INPUT_ALPHA: f64 = 0.01;
 
 /// Item count at which icon-size scaling kicks in. When the dock holds
 /// more than this many items, icons shrink to keep them all visible.

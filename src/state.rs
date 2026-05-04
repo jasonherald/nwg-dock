@@ -1,4 +1,4 @@
-//! [`DockState`] — the cross-handler mutable state shared via `Rc<RefCell<>>`.
+//! `DockState` — the cross-handler mutable state shared via `Rc<RefCell<>>`.
 //!
 //! Owns the client list, pinned items, drag state, and launch-animation state.
 //! All cross-boundary mutations go through invariant-preserving methods (see

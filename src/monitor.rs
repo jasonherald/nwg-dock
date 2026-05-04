@@ -1,7 +1,7 @@
 //! Monitor resolution: maps `--output` config to GDK monitor handles.
 //!
-//! [`resolve_monitors`] is the normal entry point; it logs a warning if the
-//! named output isn't found and falls back to all monitors. [`resolve_monitors_quiet`]
+//! `resolve_monitors` is the normal entry point; it logs a warning if the
+//! named output isn't found and falls back to all monitors. `resolve_monitors_quiet`
 //! is the same logic without the warning, used by the liveness tick in
 //! `listeners.rs` to avoid spamming the log every 2 s when `--output` targets
 //! a temporarily unavailable connector. Both variants call `resolve_monitors_inner`,

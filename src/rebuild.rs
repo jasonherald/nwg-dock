@@ -1,6 +1,6 @@
 //! Self-referential rebuild closure for the dock UI.
 //!
-//! [`create_rebuild_fn`] returns an `Rc<dyn Fn()>` that rebuilds every
+//! `create_rebuild_fn` returns an `Rc<dyn Fn()>` that rebuilds every
 //! monitor's dock content. The closure needs to pass *itself* to each button
 //! (so buttons can trigger a rebuild on pin/unpin), which would create an
 //! `Rc` cycle. The cycle is broken with a `Weak` reference stored in a

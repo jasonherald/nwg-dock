@@ -1,11 +1,11 @@
 //! Per-monitor dock window creation and monitor-diff utilities.
 //!
-//! [`MonitorDock`] bundles each dock window with its stable output connector
+//! `MonitorDock` bundles each dock window with its stable output connector
 //! name and a small amount of rebuild-tracking state (`prev_item_count` for
-//! the shrink-only layer-shell surface reset). [`create_dock_windows`] is
-//! called at cold start; [`create_single_dock_window`] is reused by the
+//! the shrink-only layer-shell surface reset). `create_dock_windows` is
+//! called at cold start; `create_single_dock_window` is reused by the
 //! monitor hotplug reconciliation path in `listeners.rs` when new monitors
-//! appear or zombie surfaces need rebuilding. [`compute_monitor_diff`] is a
+//! appear or zombie surfaces need rebuilding. `compute_monitor_diff` is a
 //! pure helper that computes add/remove sets from two name lists.
 
 use crate::config::DockConfig;

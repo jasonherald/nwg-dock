@@ -1,4 +1,4 @@
-//! [`DockContext`] — the recurring bundle passed to every dock UI builder.
+//! `DockContext` — the recurring bundle passed to every dock UI builder.
 //!
 //! Bundles the references needed on every rebuild (`config`, `state`,
 //! `data_home`, `pinned_file`, `rebuild`, `compositor`) into a single
@@ -6,7 +6,7 @@
 //! "DockContext" convention: use this whenever you'd otherwise need more than
 //! two or three of its fields as separate arguments.
 //!
-//! Distinct from [`crate::main::DockBootstrap`], which is the startup-only
+//! Distinct from `DockBootstrap` (in `src/main.rs`), which is the startup-only
 //! bundle used once during `connect_activate`. `DockContext` is reconstructed
 //! on every rebuild from the live config snapshot in `DockState`.
 
