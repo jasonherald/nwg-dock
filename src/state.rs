@@ -1,3 +1,17 @@
+//! [`DockState`] — the cross-handler mutable state shared via `Rc<RefCell<>>`.
+//!
+//! Owns the client list, pinned items, drag state, and launch-animation state.
+//! All cross-boundary mutations go through invariant-preserving methods (see
+//! `set_drag_pending`/`claim_drag`/`end_drag` and `start_launch`/`cancel_launch`)
+//! rather than direct field access, so the coupled-field invariants documented
+//! in the struct can be enforced by construction.
+//!
+//! **State borrowing:** see CLAUDE.md's "State borrowing conventions" section.
+//! The key rule: always `drop(s)` a `RefMut` before calling `rebuild()` to
+//! avoid a `BorrowMutError` panic. The reentrancy guard in `rebuild.rs` exists
+//! for the same reason — glycin's icon loading can pump the GTK main loop and
+//! re-enter a rebuild while one is already in flight.
+
 use crate::config::DockConfig;
 use gtk4::glib;
 use nwg_common::compositor::{Compositor, WmClient};

@@ -1,3 +1,12 @@
+//! Entry point and cold-start orchestration for nwg-dock.
+//!
+//! Parses CLI args (via `config.rs`), merges the TOML config file, acquires
+//! the singleton lock, sets up GTK4, and wires `connect_activate`. The two
+//! coordination types are [`DockBootstrap`] (startup-only refs bundled for
+//! `activate_dock`) and [`crate::context::DockContext`] (the smaller recurring
+//! bag passed on every rebuild). After `activate_dock` returns, the GLib main
+//! loop drives everything; this file has no further role.
+
 mod config;
 mod config_file;
 mod context;

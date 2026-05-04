@@ -1,3 +1,15 @@
+//! CLI definition and configuration types for nwg-dock.
+//!
+//! [`DockConfig`] is a `clap::Parser` struct that captures all CLI flags.
+//! It is also the merge target for TOML config-file values (see `config_file`
+//! module). The [`Position`], [`Alignment`], and [`Layer`] enums are
+//! `clap::ValueEnum` so clap handles parse + error formatting; they're also
+//! serde-serializable for round-trip through the config file.
+//!
+//! Legacy Go-era single-dash flags (e.g. `-hd`, `-ico`, `-nolauncher`) are
+//! normalised to double-dash form by [`normalize_legacy_flags`] before clap
+//! sees the argument list, so existing autostart lines keep working.
+
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 

@@ -1,3 +1,18 @@
+//! Self-referential rebuild closure for the dock UI.
+//!
+//! [`create_rebuild_fn`] returns an `Rc<dyn Fn()>` that rebuilds every
+//! monitor's dock content. The closure needs to pass *itself* to each button
+//! (so buttons can trigger a rebuild on pin/unpin), which would create an
+//! `Rc` cycle. The cycle is broken with a `Weak` reference stored in a
+//! `Rc<RefCell<Weak<dyn Fn()>>>` holder; buttons upgrade the `Weak` at
+//! call time.
+//!
+//! A `running` / `pending` `Cell<bool>` pair guards against reentrancy:
+//! glycin's icon loading uses D-Bus and can pump the GTK main loop, which
+//! may let a timer or event fire `rebuild_fn` while a build is already in
+//! flight. The guard turns recursive calls into a flag and re-runs once the
+//! outer build finishes, rather than nesting rebuilds that leave ghost widgets.
+
 use crate::context::DockContext;
 use crate::dock_windows::MonitorDock;
 use crate::state::DockState;
