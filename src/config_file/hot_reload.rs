@@ -1,4 +1,6 @@
 use crate::config::DockConfig;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Fields that cannot be hot-reloaded — see spec
 /// `docs/superpowers/specs/2026-04-28-config-file-design.md` for the
@@ -131,9 +133,9 @@ fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
 ///   their pre-edit values, so subsequent reloads still flag them).
 pub(crate) fn apply_config_change(
     new: DockConfig,
-    state: &std::rc::Rc<std::cell::RefCell<crate::state::DockState>>,
-    per_monitor: &std::rc::Rc<std::cell::RefCell<Vec<crate::dock_windows::MonitorDock>>>,
-    rebuild: &std::rc::Rc<dyn Fn()>,
+    state: &Rc<RefCell<crate::state::DockState>>,
+    per_monitor: &Rc<RefCell<Vec<crate::dock_windows::MonitorDock>>>,
+    rebuild: &Rc<dyn Fn()>,
 ) -> DiffResult {
     let old = state.borrow().config.clone();
     let result = diff_config(&old, &new);
@@ -153,14 +155,14 @@ pub(crate) fn apply_config_change(
         }
     );
 
-    apply_hot_reloadable_changes(&old, &new, per_monitor);
+    let css_file_applied = apply_hot_reloadable_changes(&old, &new, per_monitor, state);
 
     // Build the config that becomes state.config after this reload.
     // For Applicable: it's `new` verbatim. For RestartRequired: it's
     // `new` with the restart-required fields overwritten by `old`'s
     // values, so subsequent reloads still flag those as needing
     // restart until the process actually restarts.
-    let next_config = match &result {
+    let mut next_config = match &result {
         DiffResult::RestartRequired { restart_fields, .. } => {
             let mut partial = new;
             preserve_restart_fields(&old, &mut partial, restart_fields);
@@ -169,7 +171,17 @@ pub(crate) fn apply_config_change(
         _ => new,
     };
 
-    state.borrow_mut().config = std::rc::Rc::new(next_config);
+    // If the css-file rebind failed, the watcher is still pointing at the
+    // OLD file. Keep `state.config.css_file` aligned with what the watcher
+    // actually watches — otherwise the next save with the same broken
+    // path would see `old.css_file == new.css_file` and silently skip the
+    // rebind branch, re-introducing the watcher-stale failure mode this
+    // path exists to surface. (CodeRabbit catch on PR 80.)
+    if !css_file_applied {
+        next_config.css_file = old.css_file.clone();
+    }
+
+    state.borrow_mut().config = Rc::new(next_config);
 
     // Single rebuild call covers icon-size, alignment, launcher-cmd,
     // launcher-pos, nolauncher, ico, ignore-classes, ignore-workspaces,
@@ -186,11 +198,19 @@ pub(crate) fn apply_config_change(
 /// field on both `old` and `new` and only fires the update when the
 /// value actually changed. Safe to call on every reload; idempotent
 /// when nothing in this subset changed.
+///
+/// Returns `true` when the `css_file` change applied (or no change was
+/// requested), `false` when the rebind failed and the watcher still
+/// points at `old.css_file`. The caller uses this to keep
+/// `state.config.css_file` aligned with the watcher — committing
+/// `new.css_file` after a failed rebind would silently re-introduce
+/// the watcher-stale bug on the next save with the same broken path.
 fn apply_hot_reloadable_changes(
     old: &DockConfig,
     new: &DockConfig,
-    per_monitor: &std::rc::Rc<std::cell::RefCell<Vec<crate::dock_windows::MonitorDock>>>,
-) {
+    per_monitor: &Rc<RefCell<Vec<crate::dock_windows::MonitorDock>>>,
+    state: &Rc<RefCell<crate::state::DockState>>,
+) -> bool {
     use gtk4_layer_shell::{Edge, LayerShell};
 
     // Margins: per-dock set_margin.
@@ -225,18 +245,79 @@ fn apply_hot_reloadable_changes(
         log::set_max_level(level);
     }
 
-    // CSS file path: re-load from the new path. The existing CSS watcher
-    // is bound to the original path; restarting the watcher on a new
-    // path is out of scope for this PR (changing css-file mid-session
-    // is rare). reload_css_file delegates to load_css and discards the
-    // provider per the fire-and-forget pattern (CR-12).
+    // CSS file path: atomically rebind the inotify watcher to the new
+    // path so subsequent edits to the new file continue to hot-reload.
+    // On error the old watcher is preserved and we surface a desktop
+    // notification so the user knows the path swap failed. The bool we
+    // return tells the caller whether to commit `new.css_file` into
+    // `state.config` (true) or preserve `old.css_file` so the next save
+    // can retry (false).
     if old.css_file != new.css_file {
+        use super::notify::notify_user;
         let config_dir = nwg_common::config::paths::config_dir("nwg-dock-hyprland");
         let new_css_path = config_dir.join(&new.css_file);
         if new_css_path.exists() {
-            crate::ui::css::reload_css_file(&new_css_path);
+            let mut s = state.borrow_mut();
+            if let Some(handle) = s.css_watch.as_mut() {
+                match crate::ui::css::reload_css_file(handle, &new_css_path) {
+                    Ok(()) => {
+                        log::info!("CSS file rebound to {}", new_css_path.display());
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to rebind CSS to {}: {}", new_css_path.display(), e);
+                        // Release the borrow before issuing the notification —
+                        // notify_user does not touch state, but dropping here
+                        // keeps the CLAUDE.md "drop RefMut before code that
+                        // itself borrows state" rule visible at the call site.
+                        drop(s);
+                        notify_user(
+                            "nwg-dock: CSS reload failed",
+                            &format!(
+                                "Could not load new CSS file '{}': {}",
+                                new_css_path.display(),
+                                e
+                            ),
+                        );
+                        return false;
+                    }
+                }
+            } else {
+                // Per the invariant on DockState.css_watch, this branch is
+                // only reachable on an init-order regression. Notify the
+                // user anyway so a future regression is loud at runtime
+                // instead of being buried in a journalctl line.
+                log::warn!(
+                    "No CssWatchHandle available; cannot rebind CSS file to {}",
+                    new_css_path.display()
+                );
+                drop(s);
+                notify_user(
+                    "nwg-dock: CSS reload failed",
+                    &format!(
+                        "Internal error: CSS watcher handle missing while attempting to rebind to '{}'; reload skipped",
+                        new_css_path.display()
+                    ),
+                );
+                return false;
+            }
+        } else {
+            log::warn!(
+                "CSS file '{}' does not exist; skipping reload",
+                new_css_path.display()
+            );
+            notify_user(
+                "nwg-dock: CSS reload failed",
+                &format!(
+                    "Could not load new CSS file '{}': file does not exist; reload skipped",
+                    new_css_path.display()
+                ),
+            );
+            return false;
         }
     }
+
+    // No css_file change requested, or the rebind succeeded.
+    true
 }
 
 /// Overwrites the restart-required fields on `target` with the

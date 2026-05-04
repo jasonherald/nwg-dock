@@ -15,6 +15,7 @@
 use crate::config::DockConfig;
 use gtk4::glib;
 use nwg_common::compositor::{Compositor, WmClient};
+use nwg_common::config::css::CssWatchHandle;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -40,6 +41,21 @@ pub(crate) struct DockState {
 
     /// Compositor backend for IPC calls.
     pub(crate) compositor: Rc<dyn Compositor>,
+
+    /// Handle for the CSS file watcher. Used by the hot-reload path to
+    /// atomically rebind the watcher when the user changes `[appearance]
+    /// css-file` at runtime.
+    ///
+    /// **Invariant:** `None` only during construction. `activate_dock`
+    /// sets this to `Some(_)` immediately after `load_dock_css` returns
+    /// the handle, *before* any user-reachable callbacks are wired up.
+    /// By the time hot-reload (or any other handler) can fire, this is
+    /// always `Some`. The `Option` shape exists only because the
+    /// handle's GTK provider isn't available at `DockState::new` time;
+    /// callers that observe `None` here are evidence of an init-order
+    /// regression and should be loud about it (warn + skip), not
+    /// silent.
+    pub(crate) css_watch: Option<CssWatchHandle>,
 
     /// Scaled icon size (adjusted when many apps are open).
     pub(crate) img_size_scaled: i32,
@@ -123,6 +139,7 @@ impl DockState {
             pinned: Vec::new(),
             app_dirs,
             compositor,
+            css_watch: None,
             img_size_scaled,
             popover_open: false,
             locked: false,
