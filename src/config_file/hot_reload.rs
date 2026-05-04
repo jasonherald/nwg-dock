@@ -1,4 +1,6 @@
 use crate::config::DockConfig;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 /// Fields that cannot be hot-reloaded — see spec
 /// `docs/superpowers/specs/2026-04-28-config-file-design.md` for the
@@ -131,9 +133,9 @@ fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
 ///   their pre-edit values, so subsequent reloads still flag them).
 pub(crate) fn apply_config_change(
     new: DockConfig,
-    state: &std::rc::Rc<std::cell::RefCell<crate::state::DockState>>,
-    per_monitor: &std::rc::Rc<std::cell::RefCell<Vec<crate::dock_windows::MonitorDock>>>,
-    rebuild: &std::rc::Rc<dyn Fn()>,
+    state: &Rc<RefCell<crate::state::DockState>>,
+    per_monitor: &Rc<RefCell<Vec<crate::dock_windows::MonitorDock>>>,
+    rebuild: &Rc<dyn Fn()>,
 ) -> DiffResult {
     let old = state.borrow().config.clone();
     let result = diff_config(&old, &new);
@@ -169,7 +171,7 @@ pub(crate) fn apply_config_change(
         _ => new,
     };
 
-    state.borrow_mut().config = std::rc::Rc::new(next_config);
+    state.borrow_mut().config = Rc::new(next_config);
 
     // Single rebuild call covers icon-size, alignment, launcher-cmd,
     // launcher-pos, nolauncher, ico, ignore-classes, ignore-workspaces,
@@ -189,8 +191,8 @@ pub(crate) fn apply_config_change(
 fn apply_hot_reloadable_changes(
     old: &DockConfig,
     new: &DockConfig,
-    per_monitor: &std::rc::Rc<std::cell::RefCell<Vec<crate::dock_windows::MonitorDock>>>,
-    state: &std::rc::Rc<std::cell::RefCell<crate::state::DockState>>,
+    per_monitor: &Rc<RefCell<Vec<crate::dock_windows::MonitorDock>>>,
+    state: &Rc<RefCell<crate::state::DockState>>,
 ) {
     use gtk4_layer_shell::{Edge, LayerShell};
 
@@ -265,6 +267,13 @@ fn apply_hot_reloadable_changes(
             log::warn!(
                 "CSS file '{}' does not exist; skipping reload",
                 new_css_path.display()
+            );
+            notify_user(
+                "nwg-dock: CSS reload failed",
+                &format!(
+                    "Could not load new CSS file '{}': file does not exist; reload skipped",
+                    new_css_path.display()
+                ),
             );
         }
     }
