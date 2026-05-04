@@ -58,7 +58,7 @@ pub fn setup_pin_watcher(pinned_file: &Path, rebuild: &Rc<dyn Fn()>) {
         }) {
             Ok(w) => w,
             Err(e) => {
-                log::warn!("Pin watcher failed: {}", e);
+                log::warn!("Pin watcher failed: {e}");
                 return;
             }
         };
@@ -288,8 +288,7 @@ fn remove_zombie_docks(
         per_monitor.borrow_mut().retain(|dock| {
             if &dock.output_name == name {
                 log::warn!(
-                    "Rebuilding zombie dock for '{}' (layer-shell surface was destroyed)",
-                    name
+                    "Rebuilding zombie dock for '{name}' (layer-shell surface was destroyed)"
                 );
                 // destroy() not close(): see ui::window::dock_close_request_response.
                 // The dock vetoes every close-request to defeat compositor kill
@@ -371,7 +370,7 @@ fn decide_reconcile(
     // Missing monitor: GDK has a connector we don't have a dock for
     for name in gdk_names {
         if !dock_names.contains(name) {
-            log::debug!("Liveness: missing dock for '{}'", name);
+            log::debug!("Liveness: missing dock for '{name}'");
             return true;
         }
     }
@@ -379,7 +378,7 @@ fn decide_reconcile(
     // Stale dock: we have a dock for a connector GDK doesn't report anymore
     for name in dock_names {
         if !gdk_names.contains(name) {
-            log::debug!("Liveness: stale dock for '{}'", name);
+            log::debug!("Liveness: stale dock for '{name}'");
             return true;
         }
     }
@@ -387,7 +386,7 @@ fn decide_reconcile(
     // Zombie surface: dock object exists but layer-shell surface is gone
     for (name, has_surface) in dock_names.iter().zip(dock_has_surface.iter()) {
         if !has_surface {
-            log::debug!("Liveness: zombie surface for '{}'", name);
+            log::debug!("Liveness: zombie surface for '{name}'");
             return true;
         }
     }
@@ -423,7 +422,7 @@ fn remove_orphaned_docks(
         }
         per_monitor.borrow_mut().retain(|dock| {
             if &dock.output_name == name {
-                log::info!("Removing dock window for disconnected monitor: {}", name);
+                log::info!("Removing dock window for disconnected monitor: {name}");
                 // destroy() not close() — the dock's close-request veto would
                 // otherwise leave the orphaned window alive. Same rationale as
                 // remove_zombie_docks above; see #39.
@@ -449,7 +448,7 @@ fn add_new_docks(
         let Some(gdk_mon) = monitor_map.get(name) else {
             continue;
         };
-        log::info!("Creating dock window for new monitor: {}", name);
+        log::info!("Creating dock window for new monitor: {name}");
         let dock = dock_windows::create_single_dock_window(app, name, gdk_mon, config);
         dock.win.present();
         if config.autohide {

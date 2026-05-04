@@ -232,9 +232,9 @@ fn unpin_by_drag(
     let mut st = state.borrow_mut();
     if source_index < st.pinned.len() {
         let removed = st.pinned.remove(source_index);
-        log::info!("Unpinned by drag-off: {}", removed);
+        log::info!("Unpinned by drag-off: {removed}");
         if let Err(e) = pinning::save_pinned(&st.pinned, pinned_path) {
-            log::error!("Failed to save pins: {}", e);
+            log::error!("Failed to save pins: {e}");
         }
         drop(st);
         let rebuild = Rc::clone(rebuild);
@@ -267,7 +267,7 @@ fn reorder_pinned(
     st.pinned.insert(insert_at, item);
 
     if let Err(e) = pinning::save_pinned(&st.pinned, pinned_path) {
-        log::error!("Failed to save reordered pins: {}", e);
+        log::error!("Failed to save reordered pins: {e}");
     }
     drop(st);
     let rebuild = Rc::clone(rebuild);

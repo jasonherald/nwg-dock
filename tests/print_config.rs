@@ -43,8 +43,8 @@ position = "left"
     );
 
     let out = String::from_utf8(output.stdout).unwrap();
-    assert!(out.contains("icon-size = 96"), "got:\n{}", out);
-    assert!(out.contains(r#"position = "left""#), "got:\n{}", out);
+    assert!(out.contains("icon-size = 96"), "got:\n{out}");
+    assert!(out.contains(r#"position = "left""#), "got:\n{out}");
 }
 
 #[test]
@@ -71,7 +71,7 @@ icon-size = 96
     assert!(output.status.success());
 
     let out = String::from_utf8(output.stdout).unwrap();
-    assert!(out.contains("icon-size = 32"), "got:\n{}", out);
+    assert!(out.contains("icon-size = 32"), "got:\n{out}");
 }
 
 #[test]
@@ -83,7 +83,7 @@ fn print_config_with_no_file_uses_defaults() {
     assert!(output.status.success());
 
     let out = String::from_utf8(output.stdout).unwrap();
-    assert!(out.contains("icon-size = 48"), "got:\n{}", out); // built-in default
+    assert!(out.contains("icon-size = 48"), "got:\n{out}"); // built-in default
 }
 
 #[test]

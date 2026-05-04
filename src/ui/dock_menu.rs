@@ -66,7 +66,7 @@ pub fn load_lock_state() -> bool {
 fn save_lock_state(locked: bool) {
     let path = lock_file_path();
     if let Err(e) = std::fs::write(&path, if locked { "true" } else { "false" }) {
-        log::warn!("Failed to save lock state: {}", e);
+        log::warn!("Failed to save lock state: {e}");
     }
 }
 
