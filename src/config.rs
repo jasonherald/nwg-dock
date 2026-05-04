@@ -1,3 +1,15 @@
+//! CLI definition and configuration types for nwg-dock.
+//!
+//! `DockConfig` is a `clap::Parser` struct that captures all CLI flags.
+//! It is also the merge target for TOML config-file values (see `config_file`
+//! module). The `Position`, `Alignment`, and `Layer` enums are
+//! `clap::ValueEnum` so clap handles parse + error formatting; they're also
+//! serde-serializable for round-trip through the config file.
+//!
+//! Legacy Go-era single-dash flags (e.g. `-hd`, `-ico`, `-nolauncher`) are
+//! normalised to double-dash form by `normalize_legacy_flags` before clap
+//! sees the argument list, so existing autostart lines keep working.
+
 use clap::{Parser, ValueEnum};
 use std::path::PathBuf;
 
@@ -79,7 +91,10 @@ pub(crate) struct DockConfig {
     #[arg(short = 'f', long)]
     pub(crate) full: bool,
 
-    /// Quote-delimited, space-separated class list to ignore in the dock
+    /// Space-separated class list to ignore in the dock. Use the TOML
+    /// `[filters] ignore-classes = ["github desktop", ...]` array form
+    /// for class names that contain spaces — the CLI form does not
+    /// support quoted values.
     #[arg(short = 'g', long, default_value = "")]
     pub(crate) ignore_classes: String,
 
@@ -159,8 +174,11 @@ pub(crate) struct DockConfig {
     #[arg(short = 'm', long)]
     pub(crate) multi: bool,
 
-    /// Window background opacity 0-100 (default: 100, fully opaque)
-    #[arg(long, default_value_t = 100)]
+    /// Window background opacity 0-100 (default: 100, fully opaque).
+    /// Values above 100 are rejected at parse time via clap's range
+    /// validator; the runtime `opacity.min(OPACITY_PERCENT_MAX)` clamp
+    /// in `ui::css::reload_opacity` is now belt-and-suspenders.
+    #[arg(long, value_parser = clap::value_parser!(u8).range(0..=100), default_value_t = 100)]
     pub(crate) opacity: u8,
 
     /// Show a bounce animation on dock icons while an app is launching
@@ -295,6 +313,36 @@ mod tests {
     fn icon_size_default() {
         let config = DockConfig::parse_from(["test"]);
         assert_eq!(config.icon_size, 48);
+    }
+
+    #[test]
+    fn opacity_default_is_100() {
+        let config = DockConfig::parse_from(["test"]);
+        assert_eq!(config.opacity, 100);
+    }
+
+    #[test]
+    fn opacity_accepts_values_in_range() {
+        for v in [0_u8, 1, 50, 99, 100] {
+            let parsed = DockConfig::try_parse_from(["test", "--opacity", &v.to_string()])
+                .unwrap_or_else(|e| panic!("expected --opacity {v} to parse, got: {e}"));
+            assert_eq!(parsed.opacity, v);
+        }
+    }
+
+    #[test]
+    fn opacity_rejects_values_above_100() {
+        // The clap range validator should reject 101..=255 at parse
+        // time. Without this guard, runtime clamping in
+        // `reload_opacity` would silently treat 200 as 100.
+        let result = DockConfig::try_parse_from(["test", "--opacity", "101"]);
+        assert!(
+            result.is_err(),
+            "--opacity 101 should fail at parse time, got: {:?}",
+            result.map(|c| c.opacity)
+        );
+        let result = DockConfig::try_parse_from(["test", "--opacity", "200"]);
+        assert!(result.is_err(), "--opacity 200 should fail at parse time");
     }
 
     #[test]

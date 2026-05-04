@@ -2,7 +2,7 @@ use super::show_on_monitor_only_by_name;
 use crate::config::DockConfig;
 use crate::dock_windows::MonitorDock;
 use crate::state::DockState;
-use crate::ui::constants::HOTSPOT_THICKNESS;
+use crate::ui::constants::{HOTSPOT_INPUT_ALPHA, HOTSPOT_THICKNESS};
 use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4_layer_shell::LayerShell;
@@ -158,7 +158,9 @@ fn create_hotspot_window(
     static CSS_LOADED: std::sync::Once = std::sync::Once::new();
     CSS_LOADED.call_once(|| {
         let provider = gtk4::CssProvider::new();
-        provider.load_from_data(".dock-hotspot { background: rgba(0,0,0,0.01); }");
+        provider.load_from_data(&format!(
+            ".dock-hotspot {{ background: rgba(0,0,0,{HOTSPOT_INPUT_ALPHA}); }}"
+        ));
         if let Some(display) = gtk4::gdk::Display::default() {
             gtk4::style_context_add_provider_for_display(
                 &display,

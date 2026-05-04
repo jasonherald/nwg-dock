@@ -1,3 +1,18 @@
+//! Process-lifetime listeners: pin-file watcher, signal poller, and monitor reconciliation.
+//!
+//! `setup_pin_watcher` spawns an inotify-backed thread that watches the
+//! shared pin file (`~/.cache/mac-dock-pinned`) for writes by `nwg-drawer` or
+//! other tools. The watcher thread parks indefinitely — it is a process-
+//! lifetime subscription and is intentionally never joined or torn down.
+//!
+//! `setup_signal_poller` installs a GLib timer that drains SIGRTMIN+1/2/3
+//! commands (show / hide / toggle / quit) delivered via `nwg_common::signals`.
+//!
+//! `setup_monitor_watcher` and `setup_liveness_tick` detect monitor
+//! topology changes (hotplug / DPMS / lock cycles) and call
+//! `reconcile_monitors` to add, remove, or rebuild dock windows as needed.
+//! The liveness tick fires every 2 s as a backstop for missed hotplug events.
+
 use crate::config::DockConfig;
 use crate::dock_windows::{self, MonitorDock};
 use crate::monitor;

@@ -1,3 +1,18 @@
+//! Compositor event stream → smart rebuild.
+//!
+//! Spawns a background thread (`spawn_event_thread`) that drains the
+//! compositor's `WmEventStream`, then installs a GLib timer (`install_event_poller`)
+//! that polls both channels every 100 ms on the main thread. The split keeps
+//! blocking IPC off the GTK main loop while staying compatible with GTK's
+//! single-threaded object model.
+//!
+//! `WmEvent::WorkspaceChanged` bypasses the client-list diff: switching
+//! workspaces doesn't change the client set, but the workspace switcher row
+//! needs to redraw. All other events go through `needs_rebuild`, which
+//! re-queries the compositor and compares old vs new class lists before
+//! deciding to fire a rebuild (avoids spurious rebuilds on focus-only events).
+//! Rebuilds are deferred during an active drag via `state.rebuild_pending`.
+
 use crate::state::DockState;
 use gtk4::glib;
 use nwg_common::compositor::{Compositor, WmEvent};

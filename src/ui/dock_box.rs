@@ -2,6 +2,7 @@ use crate::config::DockConfig;
 use crate::context::DockContext;
 use crate::state::DockState;
 use crate::ui::buttons;
+use crate::ui::constants::{SCALE_STEP_ITEMS, SCALE_THRESHOLD_ITEMS};
 use gtk4::prelude::*;
 use nwg_common::compositor::WmClient;
 use nwg_common::pinning;
@@ -83,11 +84,19 @@ fn is_child_window_grouped(task: &WmClient, all_items: &[String]) -> bool {
 }
 
 /// Scales icon size down when too many apps would overflow the dock.
+///
+/// Formula: `icon_size * SCALE_THRESHOLD_ITEMS / (SCALE_THRESHOLD_ITEMS + overflow)`,
+/// where `overflow = (item_count - SCALE_THRESHOLD_ITEMS) / SCALE_STEP_ITEMS`.
+///
+/// Integer-division plateau: items 7-8 still return full size because
+/// `(n - 6) / 3 == 0` for n ∈ {7, 8}. The first actual scaling step fires
+/// at n = 9 (overflow = 1, result = `icon_size * 6 / 7`). This is by design,
+/// not a bug — a single extra item shouldn't shrink every icon.
 fn scale_icon_size(item_count: usize, config: &DockConfig) -> i32 {
     let count = item_count.max(1);
-    if config.icon_size * 6 / (count as i32) < config.icon_size {
-        let overflow = (item_count as i32 - 6) / 3;
-        config.icon_size * 6 / (6 + overflow)
+    if config.icon_size * SCALE_THRESHOLD_ITEMS / (count as i32) < config.icon_size {
+        let overflow = (item_count as i32 - SCALE_THRESHOLD_ITEMS) / SCALE_STEP_ITEMS;
+        config.icon_size * SCALE_THRESHOLD_ITEMS / (SCALE_THRESHOLD_ITEMS + overflow)
     } else {
         config.icon_size
     }
@@ -324,4 +333,185 @@ fn apply_launching_class(item_box: &gtk4::Box, app_id: &str, ctx: &DockContext) 
 /// Finds the Button widget inside a dock item box (which may also contain an indicator).
 fn find_child_button(item_box: &gtk4::Box) -> Option<gtk4::Button> {
     crate::ui::widgets::children(item_box).find_map(|w| w.downcast::<gtk4::Button>().ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+    use nwg_common::compositor::WmClient;
+    use std::collections::HashMap;
+
+    fn default_config() -> DockConfig {
+        // Pin `--icon-size 48` explicitly so the scale-test assertions
+        // (1→48, 6→48, 8→48, 9→41, 12→36, 100→7) stay about
+        // `scale_icon_size`'s formula. Without the override these
+        // tests would also be silently asserting the current default
+        // of `icon_size` and would break if that default ever moved.
+        DockConfig::parse_from(["test", "--icon-size", "48"])
+    }
+
+    // ─── scale_icon_size: boundary and plateau cases ───────────────────────────
+
+    /// 1 item → full size (well below threshold).
+    #[test]
+    fn scale_icon_size_one_item_full() {
+        let config = default_config();
+        assert_eq!(scale_icon_size(1, &config), 48);
+    }
+
+    /// 6 items → full size (exactly at threshold, branch not taken).
+    #[test]
+    fn scale_icon_size_threshold_boundary_full() {
+        let config = default_config();
+        assert_eq!(scale_icon_size(6, &config), 48);
+    }
+
+    /// 8 items → plateau case: branch IS taken but overflow = 0, so full size
+    /// is still returned. Pinned so refactors don't accidentally change the
+    /// boundary — items 7-8 staying at full size is intentional, not a bug.
+    #[test]
+    fn scale_icon_size_plateau_eight_items_still_full() {
+        let config = default_config();
+        assert_eq!(
+            scale_icon_size(8, &config),
+            48,
+            "items 7-8 hit the branch but overflow=0 — must stay at full size"
+        );
+    }
+
+    /// 9 items → first actual scale step: overflow = 1, result = 48 * 6 / 7 = 41.
+    #[test]
+    fn scale_icon_size_nine_items_first_step() {
+        let config = default_config();
+        assert_eq!(scale_icon_size(9, &config), 41);
+    }
+
+    /// 12 items → second scale step: overflow = 2, result = 48 * 6 / 8 = 36.
+    #[test]
+    fn scale_icon_size_twelve_items_second_step() {
+        let config = default_config();
+        assert_eq!(scale_icon_size(12, &config), 36);
+    }
+
+    /// 100 items → asymptote sanity: result must be tiny but non-zero.
+    #[test]
+    fn scale_icon_size_hundred_items_asymptote() {
+        let config = default_config();
+        let result = scale_icon_size(100, &config);
+        assert_eq!(result, 7, "expected 48 * 6 / (6 + 31) = 7");
+        assert!(result > 0, "icon size must be > 0 even with many items");
+    }
+
+    /// Zero items treated as 1 (defensive floor) — should not panic or divide by zero.
+    #[test]
+    fn scale_icon_size_zero_items_clamped() {
+        let config = default_config();
+        assert_eq!(scale_icon_size(0, &config), 48);
+    }
+
+    // ─── is_class_represented: direct match, alt variant, wm-class map ─────────
+
+    #[test]
+    fn is_class_represented_direct_match_case_insensitive() {
+        let items = vec!["Firefox".to_string()];
+        assert!(is_class_represented("firefox", &items, &HashMap::new()));
+        assert!(is_class_represented("FIREFOX", &items, &HashMap::new()));
+    }
+
+    #[test]
+    fn is_class_represented_hyphen_space_variant() {
+        let items = vec!["github-desktop".to_string()];
+        // "github desktop" should match via hyphen-space variant
+        assert!(is_class_represented(
+            "github desktop",
+            &items,
+            &HashMap::new()
+        ));
+    }
+
+    #[test]
+    fn is_class_represented_via_wm_class_map() {
+        let items = vec!["billz".to_string()];
+        let mut map = HashMap::new();
+        map.insert("com.billz.app".to_string(), "billz".to_string());
+        assert!(is_class_represented("com.billz.app", &items, &map));
+    }
+
+    #[test]
+    fn is_class_represented_not_found() {
+        let items = vec!["firefox".to_string()];
+        assert!(!is_class_represented("chromium", &items, &HashMap::new()));
+    }
+
+    // ─── is_child_window_grouped ──────────────────────────────────────────────
+
+    fn make_client(class: &str, initial_class: &str) -> WmClient {
+        WmClient::default()
+            .with_class(class)
+            .with_initial_class(initial_class)
+    }
+
+    #[test]
+    fn is_child_window_grouped_matches_initial_class() {
+        let task = make_client("Playwright", "Code");
+        let all_items = vec!["code".to_string()];
+        // initial_class "Code" is in all_items (case-insensitive) → grouped
+        assert!(is_child_window_grouped(&task, &all_items));
+    }
+
+    #[test]
+    fn is_child_window_grouped_no_initial_class() {
+        let task = make_client("firefox", "");
+        let all_items = vec!["firefox".to_string()];
+        assert!(!is_child_window_grouped(&task, &all_items));
+    }
+
+    #[test]
+    fn is_child_window_grouped_same_class_and_initial_class() {
+        // If class == initial_class the function must return false — the
+        // window is not a child and should not be grouped away.
+        let task = make_client("firefox", "firefox");
+        let all_items = vec!["firefox".to_string()];
+        assert!(!is_child_window_grouped(&task, &all_items));
+    }
+
+    // ─── should_skip_running ──────────────────────────────────────────────────
+
+    #[test]
+    fn should_skip_running_empty_class() {
+        let task = make_client("", "");
+        assert!(should_skip_running(&task, &[], &[], &[], &HashMap::new()));
+    }
+
+    #[test]
+    fn should_skip_running_ignored_class() {
+        let task = make_client("steam", "steam");
+        assert!(should_skip_running(
+            &task,
+            &[],
+            &["steam".to_string()],
+            &[],
+            &HashMap::new()
+        ));
+    }
+
+    #[test]
+    fn should_skip_running_pinned() {
+        let task = make_client("firefox", "firefox");
+        assert!(should_skip_running(
+            &task,
+            &["firefox".to_string()],
+            &[],
+            &[],
+            &HashMap::new()
+        ));
+    }
+
+    #[test]
+    fn should_skip_running_not_skipped_when_free() {
+        let task = make_client("firefox", "firefox");
+        // Not pinned, not ignored, not child — should NOT skip
+        assert!(!should_skip_running(&task, &[], &[], &[], &HashMap::new()));
+    }
 }
