@@ -85,6 +85,20 @@ data/ (or data/nwg-dock-hyprland/ in the monorepo)
 - **Unsafe** — none in this crate; the dock relies on `nwg_common::signals` for the RT-signal unsafe bits.
 - **Tests** — `#[cfg(test)] mod tests` at bottom of file, test behavior not implementation.
 
+## State borrowing conventions
+
+The dock shares `Rc<RefCell<DockState>>` across ~80+ borrow sites in the UI handlers. The pattern is load-bearing — several handlers explicitly `drop(s)` a `RefMut` before calling `rebuild()`, and the reentrancy guard in `rebuild.rs` (the `running` / `pending` `Cell<bool>` pair plus the "glycin pumping the main loop" comment inside the rebuild closure) exists because nested borrows of state via the rebuild closure caused real crashes in earlier versions.
+
+**Rules — follow them whenever you add or modify a UI handler:**
+
+1. **Drop before rebuild.** Any mutator that calls `rebuild()` must `drop(state)` first. The natural placement is `drop(s);` immediately before the `rebuild()` call. Forgetting this produces a `BorrowMutError` panic on a code path that looks harmless in isolation.
+
+2. **Deferred unborrow via `idle_add_local_once`.** When a call site can't drop the borrow synchronously (e.g. the borrow is inside a match arm that calls an async method), schedule the rebuild for the next idle tick with `glib::idle_add_local_once(move || rebuild_fn())` instead of calling it inline.
+
+3. **Read into locals, then drop.** When in doubt: read the values you need out of state into local variables, let the borrow drop (implicitly or with an explicit `drop(s)`), then call methods or fire rebuilds.
+
+**Diagnosing a `BorrowError` or `BorrowMutError` panic:** the call chain is what matters. Find the path that re-enters state (e.g. a GTK signal handler triggered by `rebuild()` that itself borrows state), then apply rule 1 or 2 to the outermost borrow site.
+
 ## Key patterns
 
 ### GTK4 button layout
