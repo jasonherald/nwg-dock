@@ -197,7 +197,7 @@ fn activate_dock(app: &gtk4::Application, params: &ActivateParams) {
     }
 
     let hotspot_ctx = if params.config.autohide {
-        listeners::setup_autohide(
+        ui::hotspot::setup_autohide(
             &per_monitor,
             &params.config,
             &state,

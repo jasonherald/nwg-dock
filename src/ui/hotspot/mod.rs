@@ -34,6 +34,10 @@ pub(super) fn show_on_monitor_only_by_name(
 /// - Compositors with cursor position IPC (Hyprland): poll cursor position
 /// - Compositors without (Sway): use thin GTK layer-shell hotspot windows
 ///
+/// Hides all dock windows after an initial delay so GTK has time to render
+/// before the first hide. Without this, the dock may appear briefly visible
+/// before autohide takes over.
+///
 /// Returns a `HotspotContext` for the Sway path, which reconciliation uses
 /// to create hotspot windows for hotplugged monitors.
 pub(crate) fn setup_autohide(
@@ -43,6 +47,19 @@ pub(crate) fn setup_autohide(
     compositor: &Rc<dyn Compositor>,
     app: &gtk4::Application,
 ) -> Option<Rc<HotspotContext>> {
+    use gtk4::glib;
+
+    // Hide on initial present so GTK has time to render before the first
+    // autohide kick. Without this delay, the dock surface may not yet
+    // have committed a frame and the set_visible(false) can race with
+    // the initial map event.
+    for dock in per_monitor.borrow().iter() {
+        let win = dock.win.clone();
+        glib::timeout_add_local_once(crate::listeners::AUTOHIDE_INITIAL_DELAY, move || {
+            win.set_visible(false);
+        });
+    }
+
     if compositor.supports_cursor_position() {
         cursor_poller::start_cursor_poller(per_monitor, state, compositor);
         None

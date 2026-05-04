@@ -6,7 +6,6 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4_layer_shell::LayerShell;
 use notify::{RecursiveMode, Watcher};
-use nwg_common::compositor::Compositor;
 use nwg_common::signals::WindowCommand;
 use std::cell::{Cell, RefCell};
 use std::path::Path;
@@ -15,7 +14,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 /// Delay before hiding dock windows after initial present (allows GTK to render).
-const AUTOHIDE_INITIAL_DELAY: Duration = Duration::from_millis(500);
+pub(crate) const AUTOHIDE_INITIAL_DELAY: Duration = Duration::from_millis(500);
 
 /// Interval for the dock liveness tick — detects missed monitor hotplug events,
 /// zombie layer-shell surfaces (DPMS/lock cycles), and drift between expected
@@ -117,27 +116,6 @@ pub(crate) fn setup_signal_poller(
         }
         glib::ControlFlow::Continue
     });
-}
-
-/// Sets up autohide: hides dock windows after initial show,
-/// then starts the appropriate autohide mechanism for the compositor.
-/// Returns a `HotspotContext` for Sway (used by reconciliation to create
-/// hotspot windows for hotplugged monitors).
-pub(crate) fn setup_autohide(
-    per_monitor: &Rc<RefCell<Vec<MonitorDock>>>,
-    config: &DockConfig,
-    state: &Rc<RefCell<DockState>>,
-    compositor: &Rc<dyn Compositor>,
-    app: &gtk4::Application,
-) -> Option<Rc<crate::ui::hotspot::HotspotContext>> {
-    for dock in per_monitor.borrow().iter() {
-        let win = dock.win.clone();
-        glib::timeout_add_local_once(AUTOHIDE_INITIAL_DELAY, move || {
-            win.set_visible(false);
-        });
-    }
-
-    crate::ui::hotspot::setup_autohide(per_monitor, config, state, compositor, app)
 }
 
 /// Watches for GDK display monitor changes and reconciles dock windows.
