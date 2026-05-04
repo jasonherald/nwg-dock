@@ -55,3 +55,16 @@ pub(crate) const INDICATOR_DIVISOR: i32 = 8;
 /// paths can't drift. Will move alongside the alpha computation when
 /// CR-2026-05-03-17 consolidates the CSS-reload logic into `ui::css`.
 pub(crate) const OPACITY_PERCENT_MAX: u8 = 100;
+
+/// Item count at which icon-size scaling kicks in. When the dock holds
+/// more than this many items, icons shrink to keep them all visible.
+/// Used by `ui::dock_box::scale_icon_size`.
+pub(crate) const SCALE_THRESHOLD_ITEMS: i32 = 6;
+
+/// Denominator step for each scaling increment beyond the threshold.
+/// One scaling step is applied for every `SCALE_STEP_ITEMS` items over
+/// the threshold. Note the integer-division plateau: items 7-8 still
+/// return full size because `(n - 6) / 3 == 0` for n ∈ {7, 8}; the
+/// first actual scaling step fires at n = 9 (overflow = 1).
+/// Used by `ui::dock_box::scale_icon_size`.
+pub(crate) const SCALE_STEP_ITEMS: i32 = 3;
