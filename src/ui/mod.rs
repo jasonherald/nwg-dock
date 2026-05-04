@@ -7,5 +7,6 @@ pub(crate) mod drag;
 pub(crate) mod hotspot;
 pub(crate) mod launch_bounce;
 pub(crate) mod menus;
+pub(crate) mod widgets;
 pub(crate) mod window;
 pub(crate) mod workspaces;

@@ -324,12 +324,5 @@ fn apply_launching_class(item_box: &gtk4::Box, app_id: &str, ctx: &DockContext) 
 
 /// Finds the Button widget inside a dock item box (which may also contain an indicator).
 fn find_child_button(item_box: &gtk4::Box) -> Option<gtk4::Button> {
-    let mut child = item_box.first_child();
-    while let Some(widget) = child {
-        if let Ok(btn) = widget.clone().downcast::<gtk4::Button>() {
-            return Some(btn);
-        }
-        child = widget.next_sibling();
-    }
-    None
+    crate::ui::widgets::children(item_box).find_map(|w| w.downcast::<gtk4::Button>().ok())
 }

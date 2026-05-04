@@ -341,22 +341,20 @@ fn calculate_drop_index(
     vertical: bool,
     dragged: &gtk4::Widget,
 ) -> usize {
-    let mut positions = Vec::new();
-    let mut child = dock_box.first_child();
-
-    while let Some(widget) = child {
-        // Skip the dragged item and non-pinned items
-        if widget != *dragged && widget.has_css_class("pinned-item") {
-            let alloc = widget.allocation();
-            let center = if vertical {
+    // Uses the children iterator but needs a filter predicate (skip dragged + non-pinned)
+    // and reads allocation data per child — slightly richer than a plain find_map, but
+    // the traversal itself benefits from the shared helper.
+    let positions: Vec<f64> = crate::ui::widgets::children(dock_box)
+        .filter(|w| w != dragged && w.has_css_class("pinned-item"))
+        .map(|w| {
+            let alloc = w.allocation();
+            if vertical {
                 f64::from(alloc.y()) + f64::from(alloc.height()) / 2.0
             } else {
                 f64::from(alloc.x()) + f64::from(alloc.width()) / 2.0
-            };
-            positions.push(center);
-        }
-        child = widget.next_sibling();
-    }
+            }
+        })
+        .collect();
 
     for (i, &center) in positions.iter().enumerate() {
         if coord < center {
