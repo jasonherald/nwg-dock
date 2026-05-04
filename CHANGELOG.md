@@ -14,6 +14,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-05-04
+
+### Added
+
+- `[appearance] css-file` is now hot-reloadable at runtime. Changing
+  the path in the config file and saving rebinds the inotify watcher
+  to the new file atomically, so subsequent edits to the new file
+  continue to live-reload without a dock restart. Previously the
+  watcher silently went stale after a path swap. Failure paths
+  (missing file, rebind error, or — if a regression ever broke the
+  init order — a missing watcher handle) now surface a desktop
+  notification in addition to the warn-level log so the failure is
+  visible without tailing journalctl. On rebind failure
+  `state.config.css_file` is kept aligned with the still-active old
+  watcher so a subsequent save with the same path actually retries.
+  (#77)
+
+### Changed
+
+- Bumped `nwg-common` dep to `0.5.0` for `watch_css_rebindable` /
+  `CssWatchHandle::rebind` / `CssRebindError`.
+- Internal: post-0.4.0 code-review rollout — 24 findings (CR-01
+  through CR-24) plus 2 late additions (CR-25 `show_context_menu` →
+  `&DockContext`, CR-26 css-file hot-reload above) covering
+  visibility tightening (`pub` → `pub(crate)` sweep), idiom
+  modernization (`From` over `as`, `f64::hypot`, inline format args,
+  let-else ladders), state-borrow invariant methods on `DockState`
+  (drag and launch-animation lifecycles), file decomposition
+  (`config_file/`, `events/`), constant extraction (`HOTSPOT_INPUT_ALPHA`,
+  `OPACITY_PERCENT_MAX`, `scale_icon_size` plateau constants), module
+  rustdoc headers, and explicit error logging in place of silent
+  `let _ = ...` discards. No external behavioural changes from these
+  beyond the css-file hot-reload above. See the rollout epic (#70)
+  and `docs/code-review/2026-05-03-comprehensive.md` for the full
+  audit trail.
+
 ## [0.4.0] — 2026-05-03
 
 ### Added
