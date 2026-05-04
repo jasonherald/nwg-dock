@@ -380,7 +380,6 @@ fn build_wm_class_map(app_dirs: &[PathBuf]) -> HashMap<String, String> {
                 .to_string();
             match nwg_common::desktop::entry::parse_desktop_file(&id, &path) {
                 Ok(entry) if !entry.startup_wm_class.is_empty() => {
-                    map.insert(entry.startup_wm_class.clone(), id.clone());
                     map.insert(entry.startup_wm_class.to_lowercase(), id);
                 }
                 Ok(_) => {} // no StartupWMClass — skip

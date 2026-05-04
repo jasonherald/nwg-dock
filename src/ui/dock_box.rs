@@ -64,9 +64,8 @@ fn is_class_represented(class: &str, items: &[String], wm_map: &HashMap<String, 
         return true;
     }
     // WMClass → desktop ID mapping (e.g. "com.billz.app" → "billz")
-    if let Some(desktop_id) = wm_map
-        .get(class)
-        .or_else(|| wm_map.get(&class.to_lowercase()))
+    // Keys are stored lowercased at insert time, so always query with a lowercased key.
+    if let Some(desktop_id) = wm_map.get(&class.to_lowercase())
         && items.iter().any(|i| i.eq_ignore_ascii_case(desktop_id))
     {
         return true;
