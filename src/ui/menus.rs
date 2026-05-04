@@ -1,4 +1,4 @@
-use crate::config::DockConfig;
+use crate::context::DockContext;
 use crate::state::DockState;
 use gtk4::prelude::*;
 use nwg_common::compositor::{Compositor, WmClient};
@@ -58,18 +58,13 @@ pub(crate) fn show_client_menu(
 }
 
 /// Creates and shows a context menu for a task (right-click).
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn show_context_menu(
     class: &str,
     instances: &[WmClient],
-    config: &DockConfig,
-    state: &Rc<RefCell<DockState>>,
-    compositor: &Rc<dyn Compositor>,
-    pinned_file: &Path,
-    rebuild: &Rc<dyn Fn()>,
+    ctx: &DockContext,
     parent: &impl IsA<gtk4::Widget>,
 ) {
-    let popover = create_tracked_popover(parent, state);
+    let popover = create_tracked_popover(parent, &ctx.state);
 
     let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
 
@@ -85,7 +80,7 @@ pub(crate) fn show_context_menu(
 
         actions_box.append(&action_button("Close", &popover, {
             let id = id.clone();
-            let comp = Rc::clone(compositor);
+            let comp = Rc::clone(&ctx.compositor);
             move || {
                 if let Err(e) = comp.close_window(&id) {
                     log::debug!("close_window failed for '{id}': {e}"); // Best-effort: window may have closed
@@ -94,7 +89,7 @@ pub(crate) fn show_context_menu(
         }));
         actions_box.append(&action_button("Toggle Floating", &popover, {
             let id = id.clone();
-            let comp = Rc::clone(compositor);
+            let comp = Rc::clone(&ctx.compositor);
             move || {
                 if let Err(e) = comp.toggle_floating(&id) {
                     log::debug!("toggle_floating failed for '{id}': {e}"); // Best-effort: window may have closed
@@ -103,7 +98,7 @@ pub(crate) fn show_context_menu(
         }));
         actions_box.append(&action_button("Fullscreen", &popover, {
             let id = id.clone();
-            let comp = Rc::clone(compositor);
+            let comp = Rc::clone(&ctx.compositor);
             move || {
                 if let Err(e) = comp.toggle_fullscreen(&id) {
                     log::debug!("toggle_fullscreen failed for '{id}': {e}"); // Best-effort: window may have closed
@@ -111,10 +106,10 @@ pub(crate) fn show_context_menu(
             }
         }));
 
-        for ws in 1..=config.num_ws {
+        for ws in 1..=ctx.config.num_ws {
             actions_box.append(&action_button(&format!("-> WS {ws}"), &popover, {
                 let id = id.clone();
-                let comp = Rc::clone(compositor);
+                let comp = Rc::clone(&ctx.compositor);
                 move || {
                     if let Err(e) = comp.move_to_workspace(&id, ws) {
                         log::debug!("move_to_workspace failed for '{id}' ws={ws}: {e}"); // Best-effort: window may have closed
@@ -131,7 +126,7 @@ pub(crate) fn show_context_menu(
     let btn = gtk4::Button::with_label("New window");
     btn.add_css_class("flat");
     let class_str = class.to_string();
-    let app_dirs = state.borrow().app_dirs.clone();
+    let app_dirs = ctx.state.borrow().app_dirs.clone();
     let p = popover.clone();
     btn.connect_clicked(move |_| {
         nwg_common::launch::launch(&class_str, &app_dirs);
@@ -144,7 +139,7 @@ pub(crate) fn show_context_menu(
     btn.add_css_class("flat");
     let insts: Vec<String> = instances.iter().map(|i| i.id.clone()).collect();
     let p = popover.clone();
-    let comp = Rc::clone(compositor);
+    let comp = Rc::clone(&ctx.compositor);
     btn.connect_clicked(move |_| {
         for id in &insts {
             if let Err(e) = comp.close_window(id) {
@@ -156,7 +151,7 @@ pub(crate) fn show_context_menu(
     vbox.append(&btn);
 
     // Pin/Unpin
-    let is_pinned = pinning::is_pinned(&state.borrow().pinned, class);
+    let is_pinned = pinning::is_pinned(&ctx.state.borrow().pinned, class);
     let btn = if is_pinned {
         gtk4::Button::with_label("Unpin")
     } else {
@@ -164,9 +159,9 @@ pub(crate) fn show_context_menu(
     };
     btn.add_css_class("flat");
     let class_str = class.to_string();
-    let state_ref = Rc::clone(state);
-    let pinned_path = pinned_file.to_path_buf();
-    let rebuild_ref = Rc::clone(rebuild);
+    let state_ref = Rc::clone(&ctx.state);
+    let pinned_path = ctx.pinned_file.as_ref().to_path_buf();
+    let rebuild_ref = Rc::clone(&ctx.rebuild);
     let p = popover.clone();
     btn.connect_clicked(move |_| {
         let mut s = state_ref.borrow_mut();
