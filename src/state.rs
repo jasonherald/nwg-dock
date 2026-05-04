@@ -568,12 +568,4 @@ mod tests {
         s.launching.insert("vscode".into(), 1);
         assert!(!s.launching_is_empty());
     }
-
-    // Seed launching state via HashMap::insert on the private field is no
-    // longer possible. The `start_launch` method requires a glib::SourceId
-    // which cannot be constructed without a running GLib context. The
-    // round-trip tests (start_launch / cancel_launch) are covered by the
-    // integration test harness (make test-integration) where GTK is
-    // available. The invariant-mutation tests above (drag-state) cover the
-    // coupled-field pattern without GLib dependencies.
 }
