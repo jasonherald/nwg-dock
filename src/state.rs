@@ -15,6 +15,7 @@
 use crate::config::DockConfig;
 use gtk4::glib;
 use nwg_common::compositor::{Compositor, WmClient};
+use nwg_common::config::css::CssWatchHandle;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -40,6 +41,12 @@ pub(crate) struct DockState {
 
     /// Compositor backend for IPC calls.
     pub(crate) compositor: Rc<dyn Compositor>,
+
+    /// Handle for the CSS file watcher. `None` at construction; set by
+    /// `activate_dock` after `load_dock_css` returns the handle.
+    /// Used by the hot-reload path to atomically rebind the watcher
+    /// when the user changes `[appearance] css-file` at runtime.
+    pub(crate) css_watch: Option<CssWatchHandle>,
 
     /// Scaled icon size (adjusted when many apps are open).
     pub(crate) img_size_scaled: i32,
@@ -123,6 +130,7 @@ impl DockState {
             pinned: Vec::new(),
             app_dirs,
             compositor,
+            css_watch: None,
             img_size_scaled,
             popover_open: false,
             locked: false,

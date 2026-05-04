@@ -180,7 +180,7 @@ struct DockBootstrap {
 
 /// Sets up the dock UI: state, monitors, windows, rebuild function, and listeners.
 fn activate_dock(app: &gtk4::Application, params: &DockBootstrap) {
-    ui::css::load_dock_css(&params.css_path, params.config.opacity);
+    let css_handle = ui::css::load_dock_css(&params.css_path, params.config.opacity);
     let _hold = app.hold();
 
     let state = Rc::new(RefCell::new(DockState::new(
@@ -189,6 +189,7 @@ fn activate_dock(app: &gtk4::Application, params: &DockBootstrap) {
         Rc::clone(&params.config),
         (*params.matches).clone(),
     )));
+    state.borrow_mut().css_watch = Some(css_handle);
     state.borrow_mut().pinned = pinning::load_pinned(&params.pinned_file);
     state.borrow_mut().locked = ui::dock_menu::load_lock_state();
     state.borrow_mut().wm_class_to_desktop_id = build_wm_class_map(&params.app_dirs);

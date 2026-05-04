@@ -1,5 +1,6 @@
 use super::constants::{DEFAULT_BG_RGB, OPACITY_PERCENT_MAX};
 use nwg_common::config::css;
+use nwg_common::config::css::CssWatchHandle;
 use std::path::Path;
 
 /// Default opacity used in the embedded GTK4 compat CSS before the
@@ -98,19 +99,27 @@ pub(crate) fn reload_opacity(opacity: u8) {
     css::load_css_override(&opacity_css);
 }
 
-/// Re-applies a user CSS file at runtime. The returned
-/// CssProvider is discarded — the existing CSS watcher (set up
-/// in `load_dock_css`) still owns the original provider, and
-/// `load_css` logs internally on failure.
-pub(crate) fn reload_css_file(path: &Path) {
-    css::load_css(path);
+/// Rebinds the CSS watcher to a new file path and loads the new stylesheet.
+///
+/// Delegates to [`CssWatchHandle::rebind`]: on `Err` the OLD watcher is
+/// preserved and hot-reload continues on the original file.
+pub(crate) fn reload_css_file(
+    handle: &mut CssWatchHandle,
+    new_path: &Path,
+) -> Result<(), css::CssRebindError> {
+    handle.rebind(new_path)
 }
 
 /// Loads the dock's CSS file and applies GTK4 compatibility overrides.
-/// Starts a file watcher for hot-reload of the user CSS.
-pub(crate) fn load_dock_css(css_path: &Path, opacity: u8) {
+/// Starts a rebindable file watcher for hot-reload of the user CSS.
+///
+/// Returns a [`CssWatchHandle`] that the caller must store for the process
+/// lifetime. The handle can be passed to [`reload_css_file`] when the user
+/// changes `[appearance] css-file` at runtime to atomically move the watcher
+/// to the new path.
+pub(crate) fn load_dock_css(css_path: &Path, opacity: u8) -> CssWatchHandle {
     let user_provider = css::load_css(css_path);
-    css::watch_css(css_path, &user_provider);
+    let watch_handle = css::watch_css_rebindable(css_path, &user_provider);
     // GTK4 button overrides as embedded defaults — user CSS can override via hot-reload
     css::load_css_from_data(&gtk4_compat_css());
 
@@ -141,4 +150,6 @@ pub(crate) fn load_dock_css(css_path: &Path, opacity: u8) {
         .dock-launching-vertical {{ animation: dock-bounce-vertical {LAUNCH_BOUNCE_DURATION_MS}ms linear infinite; }}",
     );
     css::load_css_from_data(&bounce_css);
+
+    watch_handle
 }

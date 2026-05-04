@@ -1204,9 +1204,9 @@ checksum = "c6673768db2d862beb9b39a78fdcb1a69439615d5794a1be50caa9bc92c81967"
 
 [[package]]
 name = "nwg-common"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "406ced31ecc8842d92eb2c828dc9ad69ba143ebbdbeae702041ec0da02026977"
+checksum = "37643d5e67cc883e6f973651366b758d574bfdfac030c4c233606bf15415f294"
 dependencies = [
  "clap",
  "dirs",

@@ -153,7 +153,7 @@ pub(crate) fn apply_config_change(
         }
     );
 
-    apply_hot_reloadable_changes(&old, &new, per_monitor);
+    apply_hot_reloadable_changes(&old, &new, per_monitor, state);
 
     // Build the config that becomes state.config after this reload.
     // For Applicable: it's `new` verbatim. For RestartRequired: it's
@@ -190,6 +190,7 @@ fn apply_hot_reloadable_changes(
     old: &DockConfig,
     new: &DockConfig,
     per_monitor: &std::rc::Rc<std::cell::RefCell<Vec<crate::dock_windows::MonitorDock>>>,
+    state: &std::rc::Rc<std::cell::RefCell<crate::state::DockState>>,
 ) {
     use gtk4_layer_shell::{Edge, LayerShell};
 
@@ -225,16 +226,46 @@ fn apply_hot_reloadable_changes(
         log::set_max_level(level);
     }
 
-    // CSS file path: re-load from the new path. The existing CSS watcher
-    // is bound to the original path; restarting the watcher on a new
-    // path is out of scope for this PR (changing css-file mid-session
-    // is rare). reload_css_file delegates to load_css and discards the
-    // provider per the fire-and-forget pattern (CR-12).
+    // CSS file path: atomically rebind the inotify watcher to the new
+    // path so subsequent edits to the new file continue to hot-reload.
+    // On error the old watcher is preserved and we surface a desktop
+    // notification so the user knows the path swap failed.
     if old.css_file != new.css_file {
+        use super::notify::notify_user;
         let config_dir = nwg_common::config::paths::config_dir("nwg-dock-hyprland");
         let new_css_path = config_dir.join(&new.css_file);
         if new_css_path.exists() {
-            crate::ui::css::reload_css_file(&new_css_path);
+            let mut s = state.borrow_mut();
+            if let Some(handle) = s.css_watch.as_mut() {
+                match crate::ui::css::reload_css_file(handle, &new_css_path) {
+                    Ok(()) => {
+                        log::info!("CSS file rebound to {}", new_css_path.display());
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to rebind CSS to {}: {}", new_css_path.display(), e);
+                        // Release the borrow before issuing the notification —
+                        // notify_user does not touch state, but dropping here
+                        // keeps the CLAUDE.md "drop RefMut before code that
+                        // itself borrows state" rule visible at the call site.
+                        drop(s);
+                        notify_user(
+                            "nwg-dock: CSS reload failed",
+                            &format!(
+                                "Could not load new CSS file '{}': {}",
+                                new_css_path.display(),
+                                e
+                            ),
+                        );
+                    }
+                }
+            } else {
+                log::warn!("No CssWatchHandle available; cannot rebind CSS file");
+            }
+        } else {
+            log::warn!(
+                "CSS file '{}' does not exist; skipping reload",
+                new_css_path.display()
+            );
         }
     }
 }
