@@ -74,9 +74,8 @@ pub fn setup_drag_gesture(
             return;
         };
 
-        let (dock_x, dock_y) = match widget.translate_coordinates(&dock_box, start_x, start_y) {
-            Some(coords) => coords,
-            None => return,
+        let Some((dock_x, dock_y)) = widget.translate_coordinates(&dock_box, start_x, start_y) else {
+            return;
         };
 
         // Mark drag pending immediately so event poller/autohide defer rebuilds
