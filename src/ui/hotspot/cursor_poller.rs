@@ -207,7 +207,7 @@ fn handle_visible_dock(ctx: &PollContext<'_>) {
 
     // Don't hide while a popover menu is open or a drag is in progress
     let s = ctx.state.borrow();
-    let dragging = s.drag_pending || s.drag_source_index.is_some();
+    let dragging = s.is_drag_pending() || s.drag_source_index().is_some();
     let keep_visible = s.popover_open || dragging;
     drop(s);
 
@@ -251,10 +251,10 @@ fn update_drag_state(
     at_edge: bool,
 ) {
     if dragging {
-        let was_outside = state.borrow().drag_outside_dock;
+        let was_outside = state.borrow().is_drag_outside_dock();
         let now_outside = !in_dock_area && !at_edge;
         if was_outside != now_outside {
-            state.borrow_mut().drag_outside_dock = now_outside;
+            state.borrow_mut().set_drag_outside(now_outside);
         }
     }
 }

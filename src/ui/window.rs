@@ -14,12 +14,12 @@ use gtk4_layer_shell::LayerShell;
 /// disconnect; see `listeners::remove_zombie_docks` /
 /// `listeners::remove_orphaned_docks`) must call `destroy()`, not
 /// `close()`, because `close()` is unconditionally vetoed here. See #39.
-pub fn dock_close_request_response() -> gtk4::glib::Propagation {
+pub(crate) fn dock_close_request_response() -> gtk4::glib::Propagation {
     gtk4::glib::Propagation::Stop
 }
 
 /// Configures the main dock window with layer-shell properties.
-pub fn setup_dock_window(win: &gtk4::ApplicationWindow, config: &DockConfig) {
+pub(crate) fn setup_dock_window(win: &gtk4::ApplicationWindow, config: &DockConfig) {
     win.connect_close_request(|_| dock_close_request_response());
     win.init_layer_shell();
     win.set_namespace(Some("nwg-dock-hyprland"));
@@ -73,7 +73,7 @@ pub fn setup_dock_window(win: &gtk4::ApplicationWindow, config: &DockConfig) {
 }
 
 /// Returns the (outer_orientation, inner_orientation) for the dock position.
-pub fn orientations(config: &DockConfig) -> (gtk4::Orientation, gtk4::Orientation) {
+pub(crate) fn orientations(config: &DockConfig) -> (gtk4::Orientation, gtk4::Orientation) {
     if config.is_vertical() {
         (gtk4::Orientation::Horizontal, gtk4::Orientation::Vertical)
     } else {

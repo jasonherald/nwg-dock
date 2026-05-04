@@ -24,7 +24,7 @@ fn poll_and_rebuild(
     state: &Rc<RefCell<DockState>>,
     rebuild_fn: &Rc<dyn Fn()>,
 ) {
-    let dragging = state.borrow().drag_pending || state.borrow().drag_source_index.is_some();
+    let dragging = state.borrow().is_drag_pending() || state.borrow().drag_source_index().is_some();
     let workspace_changed = drain_workspace_events(workspace_receiver);
     let client_changed = drain_new_events(receiver) && needs_rebuild(state);
 
@@ -116,7 +116,7 @@ fn needs_rebuild(state: &Rc<RefCell<DockState>>) -> bool {
 /// and triggers UI refreshes on the main thread via polling.
 /// Only rebuilds if the client list actually changed (different count
 /// or different set of classes).
-pub fn start_event_listener(
+pub(crate) fn start_event_listener(
     state: Rc<RefCell<DockState>>,
     rebuild_fn: Rc<dyn Fn()>,
     compositor: &dyn Compositor,

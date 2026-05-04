@@ -14,7 +14,7 @@ const HOTSPOT_HIDE_POLL_INTERVAL_MS: u64 = 100;
 
 /// Shared state for creating/destroying hotspot windows on Sway during monitor hotplug.
 /// Returned by `setup_autohide` when the compositor uses the hotspot approach.
-pub struct HotspotContext {
+pub(crate) struct HotspotContext {
     app: gtk4::Application,
     position: crate::config::Position,
     per_monitor: Rc<RefCell<Vec<MonitorDock>>>,
@@ -25,7 +25,7 @@ pub struct HotspotContext {
 
 impl HotspotContext {
     /// Creates a hotspot window for a newly added dock (called during reconciliation).
-    pub fn add_hotspot_for_dock(&self, dock: &MonitorDock) {
+    pub(crate) fn add_hotspot_for_dock(&self, dock: &MonitorDock) {
         let hotspot = create_hotspot_window(
             &self.app,
             self.position,
@@ -39,14 +39,14 @@ impl HotspotContext {
     }
 
     /// Destroys the hotspot window for a removed monitor.
-    pub fn remove_hotspot_for_output(&self, output_name: &str) {
+    pub(crate) fn remove_hotspot_for_output(&self, output_name: &str) {
         if let Some(hotspot) = self.hotspots.borrow_mut().remove(output_name) {
             hotspot.close();
         }
     }
 
     /// Refreshes GDK monitor references on hotspot windows (same-name reconnect).
-    pub fn refresh_monitor_refs(
+    pub(crate) fn refresh_monitor_refs(
         &self,
         monitor_map: &std::collections::HashMap<String, gtk4::gdk::Monitor>,
     ) {
@@ -105,7 +105,7 @@ pub(super) fn start_hotspot_windows(
                 // Read live config + state in the same brief borrow.
                 let s = state.borrow();
                 let keep_visible =
-                    s.popover_open || s.drag_pending || s.drag_source_index.is_some();
+                    s.popover_open || s.is_drag_pending() || s.drag_source_index().is_some();
                 let hide_timeout = s.config.hide_timeout;
                 drop(s);
 

@@ -97,7 +97,7 @@ fn scale_icon_size(item_count: usize, config: &DockConfig) -> i32 {
 /// Builds the main dock content box with pinned and task buttons.
 ///
 /// This is the core UI builder, called on every refresh.
-pub fn build(
+pub(crate) fn build(
     alignment_box: &gtk4::Box,
     ctx: &DockContext,
     win: &gtk4::ApplicationWindow,
@@ -314,13 +314,7 @@ fn is_child_already_shown(
 /// Animation stops when the widget is rebuilt without the class (after the
 /// app's window appears or the timeout fires).
 fn apply_launching_class(item_box: &gtk4::Box, app_id: &str, ctx: &DockContext) {
-    if ctx.config.launch_animation
-        && ctx
-            .state
-            .borrow()
-            .launching
-            .contains_key(&app_id.to_lowercase())
-    {
+    if ctx.config.launch_animation && ctx.state.borrow().is_launching(&app_id.to_lowercase()) {
         item_box.add_css_class("dock-launching");
         if ctx.config.is_vertical() {
             item_box.add_css_class("dock-launching-vertical");

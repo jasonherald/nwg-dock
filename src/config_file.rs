@@ -17,72 +17,72 @@ use std::path::PathBuf;
 /// so partial files (one section, empty section, missing sections) all work.
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct RawConfigFile {
+pub(crate) struct RawConfigFile {
     #[serde(default)]
-    pub behavior: BehaviorSection,
+    pub(crate) behavior: BehaviorSection,
     #[serde(default)]
-    pub layout: LayoutSection,
+    pub(crate) layout: LayoutSection,
     #[serde(default)]
-    pub appearance: AppearanceSection,
+    pub(crate) appearance: AppearanceSection,
     #[serde(default)]
-    pub launcher: LauncherSection,
+    pub(crate) launcher: LauncherSection,
     #[serde(default)]
-    pub filters: FiltersSection,
+    pub(crate) filters: FiltersSection,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct BehaviorSection {
-    pub autohide: Option<bool>,
-    pub resident: Option<bool>,
-    pub multi: Option<bool>,
-    pub debug: Option<bool>,
-    pub wm: Option<WmOverride>,
-    pub hide_timeout: Option<u64>,
-    pub hotspot_delay: Option<i64>,
-    pub hotspot_layer: Option<Layer>,
+pub(crate) struct BehaviorSection {
+    pub(crate) autohide: Option<bool>,
+    pub(crate) resident: Option<bool>,
+    pub(crate) multi: Option<bool>,
+    pub(crate) debug: Option<bool>,
+    pub(crate) wm: Option<WmOverride>,
+    pub(crate) hide_timeout: Option<u64>,
+    pub(crate) hotspot_delay: Option<i64>,
+    pub(crate) hotspot_layer: Option<Layer>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct LayoutSection {
-    pub position: Option<Position>,
-    pub alignment: Option<Alignment>,
-    pub full: Option<bool>,
-    pub mt: Option<i32>,
-    pub mb: Option<i32>,
-    pub ml: Option<i32>,
-    pub mr: Option<i32>,
-    pub output: Option<String>,
-    pub layer: Option<Layer>,
-    pub exclusive: Option<bool>,
+pub(crate) struct LayoutSection {
+    pub(crate) position: Option<Position>,
+    pub(crate) alignment: Option<Alignment>,
+    pub(crate) full: Option<bool>,
+    pub(crate) mt: Option<i32>,
+    pub(crate) mb: Option<i32>,
+    pub(crate) ml: Option<i32>,
+    pub(crate) mr: Option<i32>,
+    pub(crate) output: Option<String>,
+    pub(crate) layer: Option<Layer>,
+    pub(crate) exclusive: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct AppearanceSection {
-    pub icon_size: Option<i32>,
-    pub opacity: Option<u8>,
-    pub css_file: Option<String>,
-    pub launch_animation: Option<bool>,
+pub(crate) struct AppearanceSection {
+    pub(crate) icon_size: Option<i32>,
+    pub(crate) opacity: Option<u8>,
+    pub(crate) css_file: Option<String>,
+    pub(crate) launch_animation: Option<bool>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct LauncherSection {
-    pub launcher_cmd: Option<String>,
-    pub launcher_pos: Option<Alignment>,
-    pub nolauncher: Option<bool>,
-    pub ico: Option<String>,
+pub(crate) struct LauncherSection {
+    pub(crate) launcher_cmd: Option<String>,
+    pub(crate) launcher_pos: Option<Alignment>,
+    pub(crate) nolauncher: Option<bool>,
+    pub(crate) ico: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct FiltersSection {
-    pub ignore_classes: Option<StringOrList>,
-    pub ignore_workspaces: Option<StringOrList>,
-    pub num_ws: Option<i32>,
-    pub no_fullscreen_suppress: Option<bool>,
+pub(crate) struct FiltersSection {
+    pub(crate) ignore_classes: Option<StringOrList>,
+    pub(crate) ignore_workspaces: Option<StringOrList>,
+    pub(crate) num_ws: Option<i32>,
+    pub(crate) no_fullscreen_suppress: Option<bool>,
 }
 
 /// `ignore-classes` / `ignore-workspaces` accept either a string (CLI form,
@@ -90,13 +90,13 @@ pub struct FiltersSection {
 /// `String` shape on `DockConfig` via `into_string(separator)`.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(untagged)]
-pub enum StringOrList {
+pub(crate) enum StringOrList {
     String(String),
     List(Vec<String>),
 }
 
 impl StringOrList {
-    pub fn into_string(self, separator: &str) -> String {
+    pub(crate) fn into_string(self, separator: &str) -> String {
         match self {
             StringOrList::String(s) => s,
             StringOrList::List(v) => v.join(separator),
@@ -112,7 +112,7 @@ impl StringOrList {
 /// and actionable. The full debug form (with line/col, source error chain)
 /// goes to the log alongside any notification.
 #[derive(Debug)]
-pub enum ConfigError {
+pub(crate) enum ConfigError {
     /// Bad TOML syntax: unbalanced quotes, invalid table header, etc.
     ParseError(toml::de::Error),
     /// A known key has the wrong type or an invalid enum value. The
@@ -170,7 +170,9 @@ impl std::error::Error for ConfigError {
 /// keys (logged as warnings, never block), then via `serde_path_to_error`
 /// for typed deserialization so `InvalidValue` carries the failing field
 /// path.
-pub fn load_config_file(path: &std::path::Path) -> Result<Option<RawConfigFile>, ConfigError> {
+pub(crate) fn load_config_file(
+    path: &std::path::Path,
+) -> Result<Option<RawConfigFile>, ConfigError> {
     if !path.exists() {
         log::debug!(
             "Config file {} does not exist; using CLI + defaults",
@@ -235,7 +237,7 @@ fn section_label(name: &str) -> &'static str {
 /// the typed `RawConfigFile` schema. Used for forward-compat warnings —
 /// typos and future-version fields surface in the log without failing
 /// the load.
-pub fn collect_unknown_keys(value: &toml::Value) -> Vec<String> {
+pub(crate) fn collect_unknown_keys(value: &toml::Value) -> Vec<String> {
     let toml::Value::Table(root) = value else {
         return Vec::new();
     };
@@ -308,7 +310,7 @@ pub fn collect_unknown_keys(value: &toml::Value) -> Vec<String> {
 /// `--icon-size` → `"icon_size"`. Bool flags (no value) follow the same
 /// API; presence of `--autohide` on the CLI returns
 /// `ValueSource::CommandLine`.
-pub fn merge(
+pub(crate) fn merge(
     matches: &clap::ArgMatches,
     mut cli: DockConfig,
     file: Option<RawConfigFile>,
@@ -399,7 +401,7 @@ fn was_set_on_cli(matches: &clap::ArgMatches, id: &str) -> bool {
 /// Outcome of comparing the live `DockConfig` against a freshly-merged
 /// candidate.
 #[derive(Debug)]
-pub enum DiffResult {
+pub(crate) enum DiffResult {
     /// Old and new are identical (no save changed anything we track).
     NoChange,
     /// Only hot-reloadable fields changed; safe to apply.
@@ -432,7 +434,7 @@ const RESTART_REQUIRED_FIELDS: &[&str] = &[
 /// Computes which fields differ between `old` and `new`, classifying
 /// each as restart-required or hot-reloadable, and returns the
 /// appropriate `DiffResult`.
-pub fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
+pub(crate) fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
     let mut all_changed: Vec<&'static str> = Vec::new();
     let mut hot_reloadable: Vec<&'static str> = Vec::new();
 
@@ -525,7 +527,7 @@ pub fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
 ///   on mixed saves AND keeps decision #13's revert/re-flag behavior
 ///   intact (the restart-required fields in state.config remain at
 ///   their pre-edit values, so subsequent reloads still flag them).
-pub fn apply_config_change(
+pub(crate) fn apply_config_change(
     new: DockConfig,
     state: &std::rc::Rc<std::cell::RefCell<crate::state::DockState>>,
     per_monitor: &std::rc::Rc<std::cell::RefCell<Vec<crate::dock_windows::MonitorDock>>>,
@@ -675,7 +677,7 @@ fn preserve_restart_fields(source: &DockConfig, target: &mut DockConfig, fields:
 ///
 /// Every field is emitted with its current value so the output is a
 /// "what the dock thinks right now" snapshot.
-pub fn print_effective_config(cfg: &DockConfig) -> String {
+pub(crate) fn print_effective_config(cfg: &DockConfig) -> String {
     let raw = RawConfigFile {
         behavior: BehaviorSection {
             autohide: Some(cfg.autohide),
@@ -740,7 +742,7 @@ fn notifier_slot() -> &'static Mutex<Option<NotifyFn>> {
 /// Replaces any previously-installed stub. Tests call
 /// `clear_test_notifier` when done so other tests aren't affected.
 #[cfg(test)]
-pub fn install_test_notifier<F>(f: F)
+pub(crate) fn install_test_notifier<F>(f: F)
 where
     F: Fn(&str, &str) + Send + Sync + 'static,
 {
@@ -750,7 +752,7 @@ where
 /// Clears any installed test notifier. Subsequent calls fall through
 /// to the real D-Bus path.
 #[cfg(test)]
-pub fn clear_test_notifier() {
+pub(crate) fn clear_test_notifier() {
     *notifier_slot().lock().unwrap() = None;
 }
 
@@ -758,7 +760,7 @@ pub fn clear_test_notifier() {
 /// no notification daemon, etc.) are logged at warn level and do not
 /// propagate. Tests can install a recording stub via
 /// `install_test_notifier`.
-pub fn notify_user(summary: &str, body: &str) {
+pub(crate) fn notify_user(summary: &str, body: &str) {
     if let Some(f) = notifier_slot().lock().unwrap().as_ref() {
         f(summary, body);
         return;
@@ -785,7 +787,7 @@ pub fn notify_user(summary: &str, body: &str) {
 /// Setup failures (parent dir doesn't exist, inotify unavailable, etc.)
 /// are logged and silently fall through to "no hot-reload". The dock
 /// keeps running on whatever it loaded at cold start.
-pub fn watch_config_file<F>(path: std::path::PathBuf, on_change: F)
+pub(crate) fn watch_config_file<F>(path: std::path::PathBuf, on_change: F)
 where
     F: Fn() + 'static,
 {
@@ -877,7 +879,7 @@ where
 /// `$XDG_CONFIG_HOME/nwg-dock-hyprland/config.toml` (with the standard
 /// `~/.config/...` fallback). Path stays under `nwg-dock-hyprland/` for
 /// continuity with the existing `style.css` location.
-pub fn default_config_path() -> PathBuf {
+pub(crate) fn default_config_path() -> PathBuf {
     nwg_common::config::paths::config_dir("nwg-dock-hyprland").join("config.toml")
 }
 

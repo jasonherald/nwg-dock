@@ -25,10 +25,10 @@ use std::rc::Rc;
 /// One workspace button's render plan. Pure data — produced from the
 /// compositor's workspace list and rendered by `build_row` below.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct WorkspaceButton {
-    pub n: i32,
-    pub label: String,
-    pub is_active: bool,
+pub(crate) struct WorkspaceButton {
+    pub(crate) n: i32,
+    pub(crate) label: String,
+    pub(crate) is_active: bool,
 }
 
 /// Pure plan builder. Given the configured count and the currently-
@@ -41,7 +41,7 @@ pub struct WorkspaceButton {
 /// - `active_id == Some(n)` where `n > num_ws` → no button has
 ///   `is_active == true` (user is on a workspace beyond the
 ///   configured count; matches Go dock behavior).
-pub fn workspace_button_plan(num_ws: i32, active_id: Option<i32>) -> Vec<WorkspaceButton> {
+pub(crate) fn workspace_button_plan(num_ws: i32, active_id: Option<i32>) -> Vec<WorkspaceButton> {
     if num_ws <= 0 {
         return Vec::new();
     }
@@ -61,7 +61,7 @@ pub fn workspace_button_plan(num_ws: i32, active_id: Option<i32>) -> Vec<Workspa
 /// the workspace switcher shows different "active" buttons on
 /// different monitors on multi-monitor setups (matches what's
 /// physically visible to the user on each screen).
-pub fn active_workspace_for_monitor(
+pub(crate) fn active_workspace_for_monitor(
     compositor: &dyn Compositor,
     monitor_name: &str,
 ) -> Option<i32> {
@@ -88,7 +88,7 @@ pub fn active_workspace_for_monitor(
 /// dock layout (see `dock_box::build` integration). On NullCompositor
 /// or empty workspace list, the plan is empty and the returned Box
 /// has zero children.
-pub fn build_row(
+pub(crate) fn build_row(
     plan: &[WorkspaceButton],
     orient: gtk4::Orientation,
     compositor: &Rc<dyn Compositor>,
@@ -121,7 +121,7 @@ pub fn build_row(
 /// INDICATOR_DIVISOR / 2` toward the dock's outer edge — we cancel
 /// that bias by adding the same number of pixels of margin to the
 /// workspace row on the SAME side as the dock's `position`).
-pub fn build_workspace_row(ctx: &DockContext, monitor_name: &str) -> gtk4::Box {
+pub(crate) fn build_workspace_row(ctx: &DockContext, monitor_name: &str) -> gtk4::Box {
     let active = active_workspace_for_monitor(ctx.compositor.as_ref(), monitor_name);
     let plan = workspace_button_plan(ctx.config.num_ws, active);
     let orient = if ctx.config.is_vertical() {

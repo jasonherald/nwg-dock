@@ -8,11 +8,11 @@ use std::rc::Rc;
 /// Shared context passed to all dock UI builders.
 ///
 /// Bundles the commonly-needed references so functions don't need 5+ parameters.
-pub struct DockContext {
-    pub config: Rc<DockConfig>,
-    pub state: Rc<RefCell<DockState>>,
-    pub data_home: Rc<PathBuf>,
-    pub pinned_file: Rc<PathBuf>,
-    pub rebuild: Rc<dyn Fn()>,
-    pub compositor: Rc<dyn Compositor>,
+pub(crate) struct DockContext {
+    pub(crate) config: Rc<DockConfig>,
+    pub(crate) state: Rc<RefCell<DockState>>,
+    pub(crate) data_home: Rc<PathBuf>,
+    pub(crate) pinned_file: Rc<PathBuf>,
+    pub(crate) rebuild: Rc<dyn Fn()>,
+    pub(crate) compositor: Rc<dyn Compositor>,
 }

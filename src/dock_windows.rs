@@ -6,20 +6,20 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 /// Per-monitor dock window state used during rebuilds.
-pub struct MonitorDock {
+pub(crate) struct MonitorDock {
     /// Stable output connector name (e.g., "DP-1", "HDMI-A-1").
-    pub output_name: String,
-    pub alignment_box: gtk4::Box,
-    pub current_main_box: Rc<RefCell<Option<gtk4::Box>>>,
-    pub win: gtk4::ApplicationWindow,
+    pub(crate) output_name: String,
+    pub(crate) alignment_box: gtk4::Box,
+    pub(crate) current_main_box: Rc<RefCell<Option<gtk4::Box>>>,
+    pub(crate) win: gtk4::ApplicationWindow,
     /// Item count from the previous rebuild — used to detect content
     /// shrinkage so we only force a layer-shell surface reset when
     /// actually needed (issue #62 fix without per-rebuild flicker).
-    pub prev_item_count: Cell<usize>,
+    pub(crate) prev_item_count: Cell<usize>,
 }
 
 /// Creates a dock window for each monitor and returns the per-monitor state.
-pub fn create_dock_windows(
+pub(crate) fn create_dock_windows(
     app: &gtk4::Application,
     monitors: &[(String, gtk4::gdk::Monitor)],
     config: &DockConfig,
@@ -32,7 +32,7 @@ pub fn create_dock_windows(
 
 /// Creates a single dock window for one monitor.
 /// Reused by both initial creation and monitor hotplug reconciliation.
-pub fn create_single_dock_window(
+pub(crate) fn create_single_dock_window(
     app: &gtk4::Application,
     output_name: &str,
     mon: &gtk4::gdk::Monitor,
@@ -65,7 +65,10 @@ pub fn create_single_dock_window(
 
 /// Computes which monitors to add and which to remove.
 /// Returns (to_add, to_remove) output names.
-pub fn compute_monitor_diff(existing: &[String], current: &[String]) -> (Vec<String>, Vec<String>) {
+pub(crate) fn compute_monitor_diff(
+    existing: &[String],
+    current: &[String],
+) -> (Vec<String>, Vec<String>) {
     let to_add: Vec<String> = current
         .iter()
         .filter(|name| !existing.contains(name))

@@ -29,17 +29,17 @@ const LIVENESS_TICK_INTERVAL: Duration = Duration::from_secs(2);
 /// `state` carries the live `Rc<DockConfig>` (read at fire time so hot-reload
 /// is observed); the prior `config: Rc<DockConfig>` field was a startup-time
 /// snapshot that wouldn't see config-file edits.
-pub struct ReconcileContext {
-    pub app: gtk4::Application,
-    pub per_monitor: Rc<RefCell<Vec<MonitorDock>>>,
-    pub state: Rc<RefCell<DockState>>,
-    pub rebuild_fn: Rc<dyn Fn()>,
-    pub hotspot_ctx: Option<Rc<crate::ui::hotspot::HotspotContext>>,
+pub(crate) struct ReconcileContext {
+    pub(crate) app: gtk4::Application,
+    pub(crate) per_monitor: Rc<RefCell<Vec<MonitorDock>>>,
+    pub(crate) state: Rc<RefCell<DockState>>,
+    pub(crate) rebuild_fn: Rc<dyn Fn()>,
+    pub(crate) hotspot_ctx: Option<Rc<crate::ui::hotspot::HotspotContext>>,
 }
 
 /// Sets up an inotify-based pin file watcher that triggers a rebuild
 /// when the pin file is modified (e.g. by the drawer).
-pub fn setup_pin_watcher(pinned_file: &Path, rebuild: &Rc<dyn Fn()>) {
+pub(crate) fn setup_pin_watcher(pinned_file: &Path, rebuild: &Rc<dyn Fn()>) {
     let pin_path = pinned_file.to_path_buf();
     let rebuild = Rc::clone(rebuild);
     let (tx, rx) = mpsc::channel();
@@ -89,7 +89,7 @@ pub fn setup_pin_watcher(pinned_file: &Path, rebuild: &Rc<dyn Fn()>) {
 
 /// Sets up a signal handler poller that controls window visibility
 /// based on SIGRTMIN+1/2/3 signals.
-pub fn setup_signal_poller(
+pub(crate) fn setup_signal_poller(
     app: &gtk4::Application,
     per_monitor: &Rc<RefCell<Vec<MonitorDock>>>,
     sig_rx: &Rc<mpsc::Receiver<WindowCommand>>,
@@ -123,7 +123,7 @@ pub fn setup_signal_poller(
 /// then starts the appropriate autohide mechanism for the compositor.
 /// Returns a `HotspotContext` for Sway (used by reconciliation to create
 /// hotspot windows for hotplugged monitors).
-pub fn setup_autohide(
+pub(crate) fn setup_autohide(
     per_monitor: &Rc<RefCell<Vec<MonitorDock>>>,
     config: &DockConfig,
     state: &Rc<RefCell<DockState>>,
@@ -145,7 +145,7 @@ pub fn setup_autohide(
 /// Uses the `items-changed` signal on `Display::monitors()` to detect
 /// monitor hotplug events. Debounced via idle callback to coalesce
 /// rapid events (e.g., unplug + replug).
-pub fn setup_monitor_watcher(ctx: Rc<ReconcileContext>) {
+pub(crate) fn setup_monitor_watcher(ctx: Rc<ReconcileContext>) {
     let Some(display) = gtk4::gdk::Display::default() else {
         log::error!("No default GDK display for monitor watcher");
         return;
@@ -310,7 +310,7 @@ fn remove_zombie_docks(
 /// checks — no IPC, no allocations of any real cost. Reconciliation is only
 /// triggered when state actually diverges from expectations, so the hot path
 /// runs about as often as real monitor state changes (rare).
-pub fn setup_liveness_tick(ctx: Rc<ReconcileContext>) {
+pub(crate) fn setup_liveness_tick(ctx: Rc<ReconcileContext>) {
     glib::timeout_add_local(LIVENESS_TICK_INTERVAL, move || {
         let cfg = ctx.state.borrow().config.clone();
         if needs_reconcile(&ctx.per_monitor, &cfg) {

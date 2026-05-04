@@ -43,7 +43,7 @@ struct DragSession {
 /// competition: click without movement → app launches normally;
 /// drag past threshold → reorder begins, click is suppressed.
 /// Attaches manual drag-to-reorder on the item_box (parent of the button).
-pub fn setup_drag_gesture(
+pub(crate) fn setup_drag_gesture(
     button: &gtk4::Button,
     index: usize,
     vertical: bool,
@@ -82,7 +82,7 @@ pub fn setup_drag_gesture(
         // Mark drag pending immediately so event poller/autohide defer rebuilds
         // during the entire press→threshold→drag lifecycle. drag_source_index and
         // cursor change are deferred to drag_update after the threshold is crossed.
-        state_begin.borrow_mut().drag_pending = true;
+        state_begin.borrow_mut().set_drag_pending();
         let icon_size = state_begin.borrow().img_size_scaled;
 
         *session_begin.borrow_mut() = Some(DragSession {
@@ -103,7 +103,7 @@ pub fn setup_drag_gesture(
     let state_update = Rc::clone(state);
     let session_update = Rc::clone(&session);
     gesture.connect_drag_update(move |gesture, offset_x, offset_y| {
-        let dragging = state_update.borrow().drag_source_index.is_some();
+        let dragging = state_update.borrow().drag_source_index().is_some();
 
         if !dragging {
             // Only claim after meaningful movement. GTK4's GestureDrag fires
@@ -117,7 +117,7 @@ pub fn setup_drag_gesture(
 
             let mut sess = session_update.borrow_mut();
             let Some(ref mut s) = *sess else { return };
-            state_update.borrow_mut().drag_source_index = Some(s.source_index);
+            state_update.borrow_mut().claim_drag(s.source_index);
             set_dock_cursor(&s.dock_box, "grabbing");
             handle_drag_motion(gesture, s, &state_update, offset_x, offset_y);
         } else {
@@ -137,12 +137,10 @@ pub fn setup_drag_gesture(
         let sess = session_end.borrow_mut().take();
         let Some(s) = sess else { return };
 
-        let outside = state_end.borrow().drag_outside_dock;
+        let outside = state_end.borrow().is_drag_outside_dock();
 
-        // Clear drag state
-        state_end.borrow_mut().drag_pending = false;
-        state_end.borrow_mut().drag_source_index = None;
-        state_end.borrow_mut().drag_outside_dock = false;
+        // Clear drag state — end_drag resets all three coupled fields
+        state_end.borrow_mut().end_drag();
 
         // Restore cursor and visuals
         if let Some(root) = s.dock_box.root() {
@@ -188,7 +186,7 @@ fn handle_drag_motion(
 
     // Track inside/outside dock
     let outside = is_cursor_outside_dock(&s.dock_box, current_x, current_y, s.vertical);
-    state.borrow_mut().drag_outside_dock = outside;
+    state.borrow_mut().set_drag_outside(outside);
 
     // Visual feedback: swap icon to X when outside, update cursor
     update_removal_indicator(&s.source_item, outside, s.icon_size);

@@ -27,7 +27,7 @@ fn create_tracked_popover(
 }
 
 /// Creates and shows a popover listing all instances of a class (for multi-instance left-click).
-pub fn show_client_menu(
+pub(crate) fn show_client_menu(
     instances: &[WmClient],
     state: &Rc<RefCell<DockState>>,
     compositor: &Rc<dyn Compositor>,
@@ -59,7 +59,7 @@ pub fn show_client_menu(
 
 /// Creates and shows a context menu for a task (right-click).
 #[allow(clippy::too_many_arguments)]
-pub fn show_context_menu(
+pub(crate) fn show_context_menu(
     class: &str,
     instances: &[WmClient],
     config: &DockConfig,
@@ -177,7 +177,7 @@ pub fn show_context_menu(
 }
 
 /// Creates and shows a simple unpin context menu for pinned-only items.
-pub fn show_pinned_context_menu(
+pub(crate) fn show_pinned_context_menu(
     task_id: &str,
     state: &Rc<RefCell<DockState>>,
     pinned_file: &Path,
@@ -206,7 +206,7 @@ pub fn show_pinned_context_menu(
     popover.popup();
 }
 
-pub fn focus_window(id: &str, workspace_name: &str, compositor: &dyn Compositor) {
+pub(crate) fn focus_window(id: &str, workspace_name: &str, compositor: &dyn Compositor) {
     if workspace_name.starts_with("special") {
         let special_name = workspace_name.strip_prefix("special:").unwrap_or("");
         let _ = compositor.toggle_special_workspace(special_name); // Best-effort: Hyprland-specific

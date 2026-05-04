@@ -104,7 +104,7 @@ fn pack_button_box(
 }
 
 /// Creates a pinned app button (not currently running).
-pub fn pinned_button(app_id: &str, index: usize, ctx: &DockContext) -> gtk4::Box {
+pub(crate) fn pinned_button(app_id: &str, index: usize, ctx: &DockContext) -> gtk4::Box {
     let img_size = ctx.state.borrow().img_size_scaled;
     let app_dirs = ctx.state.borrow().app_dirs.clone();
 
@@ -170,7 +170,11 @@ pub fn pinned_button(app_id: &str, index: usize, ctx: &DockContext) -> gtk4::Box
 }
 
 /// Creates a task button for a running application.
-pub fn task_button(client: &WmClient, instances: &[WmClient], ctx: &DockContext) -> gtk4::Box {
+pub(crate) fn task_button(
+    client: &WmClient,
+    instances: &[WmClient],
+    ctx: &DockContext,
+) -> gtk4::Box {
     let img_size = ctx.state.borrow().img_size_scaled;
     let app_dirs = ctx.state.borrow().app_dirs.clone();
 
@@ -259,7 +263,10 @@ pub fn task_button(client: &WmClient, instances: &[WmClient], ctx: &DockContext)
 }
 
 /// Creates the launcher button (opens the drawer).
-pub fn launcher_button(ctx: &DockContext, win: &gtk4::ApplicationWindow) -> Option<gtk4::Box> {
+pub(crate) fn launcher_button(
+    ctx: &DockContext,
+    win: &gtk4::ApplicationWindow,
+) -> Option<gtk4::Box> {
     if ctx.config.nolauncher || ctx.config.launcher_cmd.is_empty() {
         return None;
     }
