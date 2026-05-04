@@ -142,11 +142,5 @@ fn schedule_surface_reset(win: &gtk4::ApplicationWindow) {
 /// layer-shell surface reset only when actually needed (see issue #62 fix
 /// in `rebuild_one_dock`).
 fn count_children(parent: &gtk4::Box) -> usize {
-    let mut n = 0;
-    let mut child = parent.first_child();
-    while let Some(w) = child {
-        n += 1;
-        child = w.next_sibling();
-    }
-    n
+    crate::ui::widgets::children(parent).count()
 }

@@ -64,9 +64,8 @@ fn is_class_represented(class: &str, items: &[String], wm_map: &HashMap<String, 
         return true;
     }
     // WMClass → desktop ID mapping (e.g. "com.billz.app" → "billz")
-    if let Some(desktop_id) = wm_map
-        .get(class)
-        .or_else(|| wm_map.get(&class.to_lowercase()))
+    // Keys are stored lowercased at insert time, so always query with a lowercased key.
+    if let Some(desktop_id) = wm_map.get(&class.to_lowercase())
         && items.iter().any(|i| i.eq_ignore_ascii_case(desktop_id))
     {
         return true;
@@ -324,12 +323,5 @@ fn apply_launching_class(item_box: &gtk4::Box, app_id: &str, ctx: &DockContext) 
 
 /// Finds the Button widget inside a dock item box (which may also contain an indicator).
 fn find_child_button(item_box: &gtk4::Box) -> Option<gtk4::Button> {
-    let mut child = item_box.first_child();
-    while let Some(widget) = child {
-        if let Ok(btn) = widget.clone().downcast::<gtk4::Button>() {
-            return Some(btn);
-        }
-        child = widget.next_sibling();
-    }
-    None
+    crate::ui::widgets::children(item_box).find_map(|w| w.downcast::<gtk4::Button>().ok())
 }

@@ -641,7 +641,7 @@ fn apply_hot_reloadable_changes(
             // we don't need the handle (the existing watcher still owns
             // the original provider), and load_css logs internally on
             // failure rather than returning a Result.
-            let _provider = nwg_common::config::css::load_css(&new_css_path);
+            nwg_common::config::css::load_css(&new_css_path);
         }
     }
 }
