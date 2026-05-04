@@ -73,12 +73,12 @@ pub(crate) struct DockState {
     // --- Launch-animation fields (coupled invariant) ---
     // Invariant: `launching.contains_key(k)` ↔ `launch_timeouts.contains_key(k)`.
     // Mutations go through `start_launch` / `cancel_launch` for the normal
-    // begin/cancel paths, OR through the paired `remove_launching_only` +
-    // `remove_launch_timeout_only` for the timeout-fired path (where GLib
-    // has already consumed the `SourceId` on fire, so `cancel_launch` —
-    // which would return the SourceId expecting `.remove()` — is the wrong
-    // shape). The paired helpers must always be called together; calling
-    // one without the other breaks the invariant.
+    // begin/cancel paths, OR through `finish_launch_timeout_fired` for the
+    // timeout-fired path (where GLib has already consumed the `SourceId`,
+    // so `cancel_launch` — which returns the SourceId expecting `.remove()`
+    // — is the wrong shape). All three methods touch both maps atomically,
+    // so the invariant is preserved by construction; no caller can clear
+    // one map without the other.
     /// App IDs currently showing launch bounce animation (issue #38).
     /// Value is the instance count at launch time — used to detect when a
     /// new window appears (count increases) vs an already-running app.
@@ -254,18 +254,27 @@ impl DockState {
             .collect()
     }
 
-    /// Directly removes `app_id` from the launching map without affecting
-    /// `launch_timeouts`. Used inside the timeout callback itself, where
-    /// the timeout has already fired (and thus consumed the `SourceId`).
-    pub(crate) fn remove_launching_only(&mut self, app_id: &str) -> bool {
-        self.launching.remove(app_id).is_some()
-    }
-
-    /// Removes `app_id` from `launch_timeouts` only. Paired with
-    /// `remove_launching_only` inside timeout callbacks where the
-    /// `SourceId` was consumed by the GLib runtime on fire.
-    pub(crate) fn remove_launch_timeout_only(&mut self, app_id: &str) -> Option<glib::SourceId> {
-        self.launch_timeouts.remove(app_id)
+    /// Clears launch tracking for `app_id` after its GLib timeout has
+    /// already fired. Returns `true` if the launch was being tracked,
+    /// `false` if `app_id` was already cleared (e.g. `cancel_matched`
+    /// fired first when a matching window appeared, or a double-click
+    /// reset the timer).
+    ///
+    /// The `SourceId` in `launch_timeouts` was consumed by the GLib
+    /// runtime on fire — calling `.remove()` on it would be a use-
+    /// after-free at the GLib C level, so we discard it implicitly
+    /// here. Callers in non-fired paths (window-match cancel, double-
+    /// click reset) MUST use `cancel_launch` instead, which preserves
+    /// the SourceId for explicit `.remove()`. The single-method shape
+    /// keeps the `launching ↔ launch_timeouts` invariant by
+    /// construction — a caller can't accidentally clear one map and
+    /// forget the other.
+    pub(crate) fn finish_launch_timeout_fired(&mut self, app_id: &str) -> bool {
+        let was_tracked = self.launching.remove(app_id).is_some();
+        // Discard implicitly — the GLib source has already been consumed,
+        // so calling `.remove()` would target a non-existent source.
+        self.launch_timeouts.remove(app_id);
+        was_tracked
     }
 
     // --- Other methods ---
@@ -494,20 +503,17 @@ mod tests {
     }
 
     // --- Launch-animation tests ---
-    // glib::SourceId cannot be constructed without a running GLib main loop
-    // (its only public constructor calls g_source_remove under the hood).
-    // We test cancel_launch's None path and map-state helpers directly via
-    // the launching HashMap through the snapshot/is_launching accessors,
-    // and seed state using a private insert via `launching` insert inside a
-    // test-only helper on the struct.
+    // The `launching` map holds `(app_id, instance_count)` and is independently
+    // mutable from the `launch_timeouts` map (which holds the `glib::SourceId`).
+    // Tests for the `launching`-only accessors (`is_launching`,
+    // `launching_snapshot`, `launching_is_empty`) seed the private map directly
+    // and cover both empty and non-empty cases.
     //
-    // Coverage gap (intentional): the `Some(_)` paths for `is_launching`,
-    // `launching_snapshot`, `remove_launching_only`, and the full
-    // start_launch → cancel_launch round-trip are NOT exercised here.
-    // They require a real `glib::SourceId`, which only exists inside a
-    // running GLib main loop. The integration test harness (Sway-bootstrap
-    // smoke under `tests/integration/`) covers those paths through the
-    // launch-bounce animation flow.
+    // Coverage gap (intentional): `start_launch`, `cancel_launch`'s
+    // `Some((count, source_id))` path, and `finish_launch_timeout_fired` still
+    // require a real `glib::SourceId`, which only exists inside a running GLib
+    // main loop. Those paths live in the integration suite (Sway-bootstrap
+    // smoke under `tests/integration/`) instead.
 
     #[test]
     fn cancel_launch_returns_none_when_not_tracked() {
@@ -528,15 +534,39 @@ mod tests {
     }
 
     #[test]
+    fn is_launching_true_when_present() {
+        let mut s = make_state();
+        s.launching.insert("vscode".into(), 2);
+        assert!(s.is_launching("vscode"));
+        assert!(!s.is_launching("other"));
+    }
+
+    #[test]
     fn launching_snapshot_empty_initially() {
         let s = make_state();
         assert!(s.launching_snapshot().is_empty());
     }
 
     #[test]
-    fn remove_launching_only_returns_false_when_absent() {
+    fn launching_snapshot_returns_present_entries() {
         let mut s = make_state();
-        assert!(!s.remove_launching_only("nonexistent"));
+        s.launching.insert("vscode".into(), 2);
+        s.launching.insert("firefox".into(), 5);
+        let snap = s.launching_snapshot();
+        assert_eq!(snap.len(), 2);
+        // Snapshot is Vec<(String, usize)>; HashMap iteration order isn't
+        // stable so assert via lookup rather than positional indexing.
+        let vscode = snap.iter().find(|(k, _)| k == "vscode").map(|(_, v)| *v);
+        let firefox = snap.iter().find(|(k, _)| k == "firefox").map(|(_, v)| *v);
+        assert_eq!(vscode, Some(2));
+        assert_eq!(firefox, Some(5));
+    }
+
+    #[test]
+    fn launching_is_empty_false_when_present() {
+        let mut s = make_state();
+        s.launching.insert("vscode".into(), 1);
+        assert!(!s.launching_is_empty());
     }
 
     // Seed launching state via HashMap::insert on the private field is no

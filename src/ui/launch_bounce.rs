@@ -29,13 +29,11 @@ pub(crate) fn start(app_id: &str, state: &Rc<RefCell<DockState>>, rebuild: &Rc<d
         std::time::Duration::from_secs(LAUNCH_ANIMATION_TIMEOUT_SECS),
         move || {
             let mut s = state_ref.borrow_mut();
-            // The timeout fired — launching map entry is still present (wasn't
-            // cancelled by a matching window). Remove it. The SourceId was
-            // consumed by GLib on fire, so we use the split-remove helpers
-            // rather than cancel_launch (which would return the already-consumed
-            // SourceId and expect the caller to call .remove() on it).
-            if s.remove_launching_only(&id_timeout) {
-                s.remove_launch_timeout_only(&id_timeout);
+            // The timeout fired — `finish_launch_timeout_fired` clears
+            // both maps atomically. The `SourceId` was already consumed
+            // by GLib on fire, so `cancel_launch` (which returns it for
+            // explicit `.remove()`) would be the wrong shape here.
+            if s.finish_launch_timeout_fired(&id_timeout) {
                 drop(s);
                 rebuild_ref();
             }
