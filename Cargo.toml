@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Shared library (library + binaries all on the 0.5.x line)
-nwg-common = "0.5"
+nwg-common = "0.5.1"
 
 # GTK4 + Wayland layer shell
 gtk4 = "0.10"
