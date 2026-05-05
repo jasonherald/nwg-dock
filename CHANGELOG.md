@@ -14,6 +14,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-05-05
+
+### Fixed
+
+- Long-uptime memory growth: dock no longer accumulates GiB of leaked
+  pixbuf decoder state on long-running sessions. The leak was traced
+  to glycin's per-decode internal allocations (modern
+  `gdk_pixbuf_new_from_file_at_scale` delegates to glycin), invoked
+  from the dock's icon-load path on every rebuild. heaptrack confirmed
+  ~3.5 M glycin allocator calls during a 90-second focus-churn run,
+  extrapolating to the 15.9 GiB peak RSS observed over 2.5 days
+  uptime in #83. Bumping `nwg-common` to `0.5.1` picks up a process-
+  lifetime pixbuf cache keyed by `(icon, size)` / `(path, w, h)`, so
+  glycin runs once per unique input rather than per rebuild — a 99.8%
+  reduction in glycin allocator calls under the same churn driver.
+  No code changes in `nwg-dock` itself; the fix lives entirely in
+  `nwg-common::desktop::icons`. (#83)
+
+### Changed
+
+- Bumped `nwg-common` dep to `0.5.1`.
+
 ## [0.5.0] — 2026-05-04
 
 ### Added
