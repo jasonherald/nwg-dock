@@ -181,7 +181,19 @@ struct DockBootstrap {
 /// Sets up the dock UI: state, monitors, windows, rebuild function, and listeners.
 fn activate_dock(app: &gtk4::Application, params: &DockBootstrap) {
     let css_handle = ui::css::load_dock_css(&params.css_path, params.config.opacity);
-    let _hold = app.hold();
+
+    // Hold the GTK Application for the lifetime of the process. Without
+    // this, when Hyprland reports the (only) monitor as disconnected
+    // during a sustained DPMS-off — which it does after ~5 minutes —
+    // GDK fires `items-changed`, our reconcile path destroys the dock
+    // window via `dock.win.destroy()`, and `gtk4::Application` then
+    // auto-exits because no windows remain. The user wakes up to find
+    // the dock gone (issue #82). The hold guard's `Drop` impl calls
+    // `release()`, so we deliberately leak it via `mem::forget` to keep
+    // the hold for the entire process lifetime; explicit `app.quit()`
+    // from the SIGRTMIN signal poller still exits regardless of the
+    // hold count.
+    std::mem::forget(app.hold());
 
     let state = Rc::new(RefCell::new(DockState::new(
         params.app_dirs.clone(),
