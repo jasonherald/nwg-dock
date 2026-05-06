@@ -152,6 +152,8 @@ setup-hyprland:
 	@echo "#"
 	@echo "# Without uwsm (Slackware, distros where uwsm isn't packaged, or by preference):"
 	@echo "exec-once = $(BIN_NAME) -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c \"nwg-drawer --pb-auto\""
+	@echo "#"
+	@echo "# Note: nwg-dock has no runtime dependency on uwsm/systemd; the wrapper is optional."
 
 setup-sway:
 	@echo "# Add to ~/.config/sway/config:"
