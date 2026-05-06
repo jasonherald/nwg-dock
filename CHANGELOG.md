@@ -14,6 +14,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.2] — 2026-05-06
+
+### Fixed
+
+- Dock no longer disappears overnight when the screen is left
+  in DPMS-off / locked state for extended periods. Hyprland reports
+  the monitor as disconnected after sustained DPMS-off (~5 minutes
+  reproducibly), GDK propagates the topology change, and our
+  reconcile path destroys the dock window — at which point gtk4's
+  Application defaulted to exiting the process. The dock now holds
+  the gtk4::Application for its full lifetime via `mem::forget(app.hold())`,
+  so the process survives the transient zero-window state and the
+  liveness tick recreates the dock window when the monitor returns.
+  Total recovery is a few seconds; SIGRTMIN-driven `app.quit()` from
+  the signal poller still exits regardless of the hold count, so
+  intentional shutdown is unaffected. (#82)
+
 ## [0.5.1] — 2026-05-05
 
 ### Fixed
