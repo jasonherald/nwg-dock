@@ -146,7 +146,12 @@ uninstall:
 
 setup-hyprland:
 	@echo "# Add to ~/.config/hypr/autostart.conf:"
+	@echo "#"
+	@echo "# With uwsm (typical Arch+Hyprland; gives systemd-scoped session management):"
 	@echo "exec-once = uwsm-app -- $(BIN_NAME) -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c \"nwg-drawer --pb-auto\""
+	@echo "#"
+	@echo "# Without uwsm (Slackware, distros where uwsm isn't packaged, or by preference):"
+	@echo "exec-once = $(BIN_NAME) -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c \"nwg-drawer --pb-auto\""
 
 setup-sway:
 	@echo "# Add to ~/.config/sway/config:"

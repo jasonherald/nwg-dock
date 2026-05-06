@@ -189,10 +189,21 @@ make setup-sway
 
 ### Hyprland autostart example
 
+If you use [uwsm](https://github.com/Vladimir-csp/uwsm) for systemd-scoped session management (the typical Arch+Hyprland setup):
+
 ```ini
 # ~/.config/hypr/autostart.conf
 exec-once = uwsm-app -- nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c "nwg-drawer --opacity 88 --pb-auto"
 ```
+
+Without uwsm (Slackware, distros where `uwsm` isn't packaged, or by preference) — drop the `uwsm-app --` prefix:
+
+```ini
+# ~/.config/hypr/autostart.conf
+exec-once = nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c "nwg-drawer --opacity 88 --pb-auto"
+```
+
+The dock has no runtime dependency on uwsm or systemd; the wrapper just buys you per-process cgroup tracking and clean teardown on logout if you want it.
 
 ## Signal control
 
