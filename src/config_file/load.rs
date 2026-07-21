@@ -46,7 +46,7 @@ pub(crate) fn load_config_file(
 
     // Pass 2: typed parse via serde_path_to_error so we know which field
     // failed when a user puts a string in a numeric slot.
-    let de = toml::Deserializer::new(content);
+    let de = toml::Deserializer::parse(content).map_err(ConfigError::ParseError)?;
     serde_path_to_error::deserialize(de)
         .map_err(|err| {
             let err_path = err.path().to_string();

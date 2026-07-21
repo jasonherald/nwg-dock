@@ -222,6 +222,7 @@ upgrade: build-release
 		INSTALL_TARGET_REAL="$$(readlink -f "$$INSTALL_TARGET" 2>/dev/null || echo "$$INSTALL_TARGET")"; \
 		for pid in $$RUNNING_PIDS; do \
 			RUNNING_EXE="$$(readlink -f "/proc/$$pid/exe" 2>/dev/null)"; \
+			RUNNING_EXE=$${RUNNING_EXE%" (deleted)"}; \
 			if [ -z "$$RUNNING_EXE" ]; then \
 				if [ -d "/proc/$$pid" ]; then \
 					echo "ERROR: unable to resolve /proc/$$pid/exe for live dock pid $$pid"; \
@@ -257,6 +258,7 @@ upgrade: build-release
 			if ! DUMP_OUT="$$(target/release/$(BIN_NAME) --dump-args "$$pid" 2>/dev/null)"; then \
 				ACTUAL_START="$$(sed 's/.*) //' "/proc/$$pid/stat" 2>/dev/null | awk '{print $$20}' || true)"; \
 				ACTUAL_EXE="$$(readlink -f "/proc/$$pid/exe" 2>/dev/null || true)"; \
+				ACTUAL_EXE=$${ACTUAL_EXE%" (deleted)"}; \
 				if [ -n "$$ACTUAL_START" ] && [ "$$ACTUAL_START" = "$$START_TIME" ] && \
 				   [ "$$ACTUAL_EXE" = "$$INSTALL_TARGET_REAL" ]; then \
 					echo "ERROR: --dump-args failed for live dock pid $$pid"; \

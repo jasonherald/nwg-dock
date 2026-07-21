@@ -111,13 +111,9 @@ mod tests {
         // _guard drops at end of scope, restoring the previous notifier.
     }
 
-    #[test]
-    fn notify_falls_through_to_default_when_no_stub() {
-        // Without a stub, `notify_user` should not panic. Real D-Bus may
-        // or may not deliver — we only assert the call doesn't crash.
-        // No guard installed; the slot stays at whatever the previous
-        // test left (or None at process start). Either way the call is
-        // safe.
-        notify_user("default", "path");
-    }
+    // The no-stub fall-through (real `notify_rust` send) is deliberately
+    // not unit-tested: exercising it sends an actual desktop notification
+    // on whatever machine runs the suite, and there is no way to fake the
+    // session bus without unsafe env manipulation. The branch is a single
+    // best-effort call whose failures are already logged, not propagated.
 }

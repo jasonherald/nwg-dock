@@ -205,6 +205,28 @@ exec-once = nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-a
 
 The dock has no runtime dependency on uwsm or systemd; the wrapper just buys you per-process cgroup tracking and clean teardown on logout if you want it.
 
+### Known issue: GTK4 crash on DPMS cycles (Hyprland ≥ 0.56)
+
+GTK ≤ 4.22 has a bug in its Wayland dmabuf-feedback handler
+(`gdk/wayland/gdkdmabuf-wayland.c` munmaps the wrong pointer when the
+compositor re-sends `zwp_linux_dmabuf_feedback_v1`). Hyprland 0.56 started
+re-sending that feedback every time an output is disabled/re-enabled, so any
+GTK4 client — the dock included — can segfault in
+`wl_display_dispatch_queue_pending` after a DPMS off/on cycle. Whether a given
+cycle crashes depends on heap-allocation alignment, so it strikes
+intermittently.
+
+Until a fixed GTK ships, launch the dock with the dmabuf protocol disabled:
+
+```ini
+# ~/.config/hypr/autostart.conf
+exec-once = uwsm-app -- env GDK_WAYLAND_DISABLE=zwp_linux_dmabuf_v1 nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c "nwg-drawer --opacity 88 --pb-auto"
+```
+
+The dock doesn't use dmabuf texture import or graphics offload, so the only
+effect of the switch is dodging the crash. The same prefix protects any other
+GTK4 layer-shell client that dies the same way after screen blanking.
+
 ## Signal control
 
 ```bash
