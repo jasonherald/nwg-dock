@@ -16,26 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Dependency refresh: `nwg-common` 0.6, `gtk4` 0.11, `gtk4-layer-shell` 0.8,
-  `toml` 1.x (dedupes the two toml copies previously in the build graph).
-  Toolchain and MSRV move from Rust 1.95 to 1.97 to match `nwg-common` 0.6.
+- Now built on `nwg-common` 0.6 and the GTK4 0.11 stack. Building from
+  source requires Rust 1.97 or newer.
+- README documents the GTK ≤ 4.22 dmabuf-feedback crash triggered by
+  Hyprland ≥ 0.56 DPMS cycles, and the `GDK_WAYLAND_DISABLE=zwp_linux_dmabuf_v1`
+  launch workaround.
 
 ### Fixed
 
 - `--print-config` with a broken config file no longer fires a desktop
   notification on top of the stderr report — popups are reserved for
-  cold starts, where no terminal is attached. This also stops the test
-  suite from popping real notifications on the developer's desktop.
+  cold starts, where no terminal is attached.
 - `make upgrade` no longer aborts with a bogus prefix-mismatch error when
   the running dock's binary was already replaced on disk by `make install`
-  (the kernel's ` (deleted)` suffix on `/proc/pid/exe` broke the guard's
+  (the kernel's `(deleted)` suffix on `/proc/pid/exe` broke the guard's
   path comparison).
-
-### Documentation
-
-- README documents the GTK ≤ 4.22 dmabuf-feedback crash triggered by
-  Hyprland ≥ 0.56 DPMS cycles, and the `GDK_WAYLAND_DISABLE=zwp_linux_dmabuf_v1`
-  launch workaround.
 
 ## [0.5.2] — 2026-05-06
 
