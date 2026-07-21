@@ -20,6 +20,19 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # Files a GitHub issue per new advisory on scheduled runs, and fails
+      # push/PR runs on vulnerabilities. Two gaps make it insufficient alone:
+      # scheduled runs stay green even when advisories are found, and
+      # informational advisories (unsound, yanked) never fail the check.
       - uses: rustsec/audit-check@69366f33c96575abad1ee0dba8212993eecbe998 # v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      # Explicit gate covering those gaps: red run on every trigger for
+      # vulnerabilities (cargo-audit default) plus unsound and yanked
+      # crates. Unmaintained stays warn-only — transitive unmaintained
+      # deps are common and rarely actionable from here.
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2.84.0
+        with:
+          tool: cargo-audit
+      - name: cargo audit (fail on vulnerabilities, unsound, yanked)
+        run: cargo audit --deny unsound --deny yanked
