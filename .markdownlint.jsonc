@@ -1,0 +1,11 @@
+{
+  // README/CLAUDE.md prose intentionally uses long lines; wrapping is left
+  // to the renderer.
+  "MD013": false,
+  // Keep a Changelog repeats the same bucket headings (Added/Changed/Fixed…)
+  // under every release — only flag duplicates within the same section.
+  "MD024": { "siblings_only": true },
+  // Table pipe-alignment style enforcement; existing tables mix styles and
+  // render identically either way.
+  "MD060": false
+}

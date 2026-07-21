@@ -1,0 +1,6 @@
+{
+  // Rule configuration lives in .markdownlint.jsonc so other consumers
+  // (editors, CodeRabbit) share it. This file only scopes what the CLI
+  // walks: skip internal working documents and build output.
+  "ignores": ["docs/**", "target/**"]
+}
