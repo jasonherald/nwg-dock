@@ -73,11 +73,16 @@ fn main() {
         Err(e) => {
             log::error!("Config file error at {}: {}", config_path.display(), e);
             // Best-effort notify; cold start has no prior state to keep,
-            // so we still exit on error.
-            config_file::notify_user(
-                "nwg-dock: config error",
-                &format!("{}: {}", config_path.display(), e),
-            );
+            // so we still exit on error. Skip the popup in --print-config
+            // mode: that's a terminal diagnostic, so stderr is the right
+            // channel (and the desktop popup would fire on every test-suite
+            // run via the malformed-config integration test).
+            if !cli_config.print_config {
+                config_file::notify_user(
+                    "nwg-dock: config error",
+                    &format!("{}: {}", config_path.display(), e),
+                );
+            }
             std::process::exit(1);
         }
     };
