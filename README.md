@@ -34,7 +34,7 @@ Ported from [nwg-piotr/nwg-dock-hyprland](https://github.com/nwg-piotr/nwg-dock-
 
 ### Requirements
 
-- **Rust 1.95** or later (pinned in `rust-toolchain.toml`; rustup picks it up automatically)
+- **Rust 1.97** or later (pinned in `rust-toolchain.toml`; rustup picks it up automatically)
 - **GTK4** and **gtk4-layer-shell** system libraries
 - A supported compositor: **Hyprland** or **Sway** — on other Wayland compositors (Niri, river, etc.) the dock starts in degraded mode: pinned apps still render and click-to-launch still works, but live features (auto-hide, workspace switcher, event-driven rebuilds) are disabled. A warning logs to stderr/journal so you know you're running degraded.
 
