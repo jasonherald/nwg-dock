@@ -43,7 +43,7 @@ nix = { version = "0.31", features = ["signal", "process", "fs"] }
 notify = "8"
 
 # Config file (TOML parser + field-name extraction on type errors)
-toml = "0.8"
+toml = "1"
 serde_path_to_error = "0.1"
 
 # Desktop notifications (D-Bus libnotify wrapper) for config-file lint
