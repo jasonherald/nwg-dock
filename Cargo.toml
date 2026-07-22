@@ -16,7 +16,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Shared library
-nwg-common = "0.6"
+nwg-common = "0.7"
 
 # GTK4 + Wayland layer shell
 gtk4 = "0.11"

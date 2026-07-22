@@ -235,6 +235,29 @@ fn handle_visible_dock(ctx: &PollContext<'_>) {
     }
 
     if in_dock_area || at_edge || keep_visible {
+        // Diagnose stuck-open docks: if only `keep_visible` is holding the
+        // dock on screen, say which flag is responsible. Logged on the
+        // suppression *transition* (not per poll tick) to keep debug output
+        // readable.
+        thread_local! {
+            static SUPPRESS_LOGGED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+        }
+        if keep_visible && !in_dock_area && !at_edge {
+            SUPPRESS_LOGGED.with(|logged| {
+                if !logged.get() {
+                    logged.set(true);
+                    let s = ctx.state.borrow();
+                    log::debug!(
+                        "autohide suppressed away from dock: popover_open={} drag_pending={} drag_source_index={:?}",
+                        s.popover_open,
+                        s.is_drag_pending(),
+                        s.drag_source_index()
+                    );
+                }
+            });
+        } else {
+            SUPPRESS_LOGGED.with(|logged| logged.set(false));
+        }
         *ctx.left_at.borrow_mut() = None;
     } else {
         check_hide_timer(ctx.docks, ctx.left_at, ctx.hide_timeout);
