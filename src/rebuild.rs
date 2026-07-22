@@ -79,6 +79,16 @@ pub(crate) fn create_rebuild_fn(
                 let rebuild_ref: Rc<dyn Fn()> =
                     holder.borrow().upgrade().unwrap_or_else(|| Rc::new(|| {}));
 
+                // The rebuild below destroys every dock widget, including any
+                // popover that is still open. A popover finalized together
+                // with its parent button never emits `closed`, so the
+                // show/closed pair in `menus::attach_popover_state_tracking`
+                // leaks `popover_open = true` — which permanently suppresses
+                // autohide (dock stuck open). Reset the flag as part of the
+                // teardown; a popover opened after this rebuild sets it true
+                // again through the normal `show` signal.
+                state.borrow_mut().popover_open = false;
+
                 // Read live config from state. Brief borrow; dropped before
                 // dock_box::build is called (which itself may borrow state).
                 let cfg_snapshot = state.borrow().config.clone();

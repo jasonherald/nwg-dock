@@ -16,8 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Now built on `nwg-common` 0.6 and the GTK4 0.11 stack. Building from
+- Now built on `nwg-common` 0.7 and the GTK4 0.11 stack. Building from
   source requires Rust 1.97 or newer.
+- Window actions (focus on click, close, float, fullscreen, move/switch
+  workspace, launch) now work on Hyprland 0.55+ sessions using the new
+  Lua configuration, via `nwg-common` 0.7's dispatch-syntax fallback. (#90)
 - README documents the GTK ≤ 4.22 dmabuf-feedback crash triggered by
   Hyprland ≥ 0.56 DPMS cycles, and the `GDK_WAYLAND_DISABLE=zwp_linux_dmabuf_v1`
   launch workaround.
@@ -31,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the running dock's binary was already replaced on disk by `make install`
   (the kernel's `(deleted)` suffix on `/proc/pid/exe` broke the guard's
   path comparison).
+- Auto-hide no longer gets permanently stuck showing the dock after a
+  right-click menu action. A menu action that mutates a window (close,
+  float, move to workspace, …) triggers a dock rebuild while the menu
+  popover is still open; the popover is then destroyed with its parent
+  button and never emits `closed`, leaking the menu-open flag that
+  suppresses hiding. The rebuild now resets the flag as part of tearing
+  the widgets down. With `--debug`, the cursor poller also logs which
+  flag is suppressing auto-hide when the dock is held open away from
+  the cursor, so any future stuck-open report names its cause.
 
 ## [0.5.2] — 2026-05-06
 
