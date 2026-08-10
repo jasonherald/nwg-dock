@@ -130,7 +130,14 @@ pub(crate) fn build_workspace_row(ctx: &DockContext, monitor_name: &str) -> gtk4
         gtk4::Orientation::Horizontal
     };
     let row = build_row(&plan, orient, &ctx.compositor);
-    apply_position_offset(&row, ctx.config.position, ctx.config.icon_size);
+    // Use the SCALED icon size — the indicators this offset cancels are
+    // sized from `img_size_scaled`, so the unscaled `icon_size` over-
+    // compensated whenever many items shrank the icons.
+    apply_position_offset(
+        &row,
+        ctx.config.position,
+        ctx.state.borrow().img_size_scaled,
+    );
     row
 }
 

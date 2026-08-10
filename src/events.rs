@@ -198,8 +198,7 @@ fn install_event_poller(
     glib::timeout_add_local(
         std::time::Duration::from_millis(EVENT_POLL_INTERVAL_MS),
         move || {
-            let thread_dead =
-                poll_and_rebuild(&receiver, &workspace_receiver, &state, &rebuild_fn);
+            let thread_dead = poll_and_rebuild(&receiver, &workspace_receiver, &state, &rebuild_fn);
 
             if thread_dead {
                 if ticks_until_reconnect == 0 {
@@ -249,7 +248,13 @@ pub(crate) fn start_event_listener(
     };
 
     spawn_event_thread(stream, sender, ws_sender);
-    install_event_poller(receiver, ws_receiver, state, rebuild_fn, Rc::clone(compositor));
+    install_event_poller(
+        receiver,
+        ws_receiver,
+        state,
+        rebuild_fn,
+        Rc::clone(compositor),
+    );
 }
 
 #[cfg(test)]

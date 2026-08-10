@@ -13,6 +13,14 @@ where
 {
     use notify::{RecursiveMode, Watcher};
 
+    // Follow symlinks: a config.toml symlinked from a dotfiles repo
+    // (stow/chezmoi) emits inotify events at the TARGET's parent, not
+    // the symlink's — watching the literal path meant edits to the real
+    // file never hot-reloaded. Canonicalize both the watch target and
+    // the comparison path; fall back to the literal path if the link is
+    // dangling.
+    let path = std::fs::canonicalize(&path).unwrap_or(path);
+
     let Some(parent) = path.parent().map(|p| p.to_path_buf()) else {
         log::warn!("Config watcher: no parent dir for {}", path.display());
         return;

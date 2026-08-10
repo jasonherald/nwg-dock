@@ -113,10 +113,12 @@ pub(crate) fn setup_drag_gesture(
             if distance < DRAG_CLAIM_THRESHOLD {
                 return;
             }
-            gesture.set_state(gtk4::EventSequenceState::Claimed);
-
+            // Claim only once a session exists — claiming first meant a
+            // drag whose begin-guards bailed (no session) could still
+            // swallow the button's click with nothing to show for it.
             let mut sess = session_update.borrow_mut();
             let Some(ref mut s) = *sess else { return };
+            gesture.set_state(gtk4::EventSequenceState::Claimed);
             state_update.borrow_mut().claim_drag(s.source_index);
             set_dock_cursor(&s.dock_box, "grabbing");
             handle_drag_motion(gesture, s, &state_update, offset_x, offset_y);

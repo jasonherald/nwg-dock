@@ -14,35 +14,39 @@ struct IndicatorAsset {
 }
 
 fn indicator_asset(count: usize, vertical: bool) -> IndicatorAsset {
+    // INDICATOR_DIVISOR is shared with ui/workspaces.rs, which cancels
+    // the alignment bias this indicator introduces — an inline `8` here
+    // would silently desync the two if the constant ever changed.
+    use crate::ui::constants::INDICATOR_DIVISOR;
     match (count, vertical) {
         (0, false) => IndicatorAsset {
             name: "task-empty.svg",
             width_divisor: 1,
-            height_divisor: 8,
+            height_divisor: INDICATOR_DIVISOR,
         },
         (0, true) => IndicatorAsset {
             name: "task-empty-vertical.svg",
-            width_divisor: 8,
+            width_divisor: INDICATOR_DIVISOR,
             height_divisor: 1,
         },
         (1, false) => IndicatorAsset {
             name: "task-single.svg",
             width_divisor: 1,
-            height_divisor: 8,
+            height_divisor: INDICATOR_DIVISOR,
         },
         (1, true) => IndicatorAsset {
             name: "task-single-vertical.svg",
-            width_divisor: 8,
+            width_divisor: INDICATOR_DIVISOR,
             height_divisor: 1,
         },
         (_, false) => IndicatorAsset {
             name: "task-multiple.svg",
             width_divisor: 1,
-            height_divisor: 8,
+            height_divisor: INDICATOR_DIVISOR,
         },
         (_, true) => IndicatorAsset {
             name: "task-multiple-vertical.svg",
-            width_divisor: 8,
+            width_divisor: INDICATOR_DIVISOR,
             height_divisor: 1,
         },
     }
@@ -268,7 +272,20 @@ pub(crate) fn launcher_button(
         icons::create_pixbuf(&ctx.config.ico, img_size)
     };
 
-    let pb = pixbuf?;
+    let Some(pb) = pixbuf else {
+        // A silent None here made the launcher button vanish with zero
+        // diagnostics when grid.svg is missing or --ico points at a bad
+        // path.
+        log::warn!(
+            "Launcher icon failed to load ({}); hiding launcher button",
+            if ctx.config.ico.is_empty() {
+                "bundled grid.svg missing from data dir"
+            } else {
+                &ctx.config.ico
+            }
+        );
+        return None;
+    };
     let image = gtk4::Image::from_pixbuf(Some(&pb));
     image.set_pixel_size(img_size);
     button.set_child(Some(&image));

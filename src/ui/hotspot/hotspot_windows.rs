@@ -202,7 +202,8 @@ fn create_hotspot_window(ctx: &HotspotContext, dock: &MonitorDock) -> gtk4::Appl
     let motion = gtk4::EventControllerMotion::new();
     motion.connect_enter(move |_, _, _| {
         let cfg = state_enter.borrow().config.clone();
-        if !cfg.no_fullscreen_suppress && compositor_fullscreen_check(&compositor_enter, &name_enter)
+        if !cfg.no_fullscreen_suppress
+            && compositor_fullscreen_check(&compositor_enter, &name_enter)
         {
             return;
         }
@@ -219,11 +220,12 @@ fn create_hotspot_window(ctx: &HotspotContext, dock: &MonitorDock) -> gtk4::Appl
         let name_show = name_enter.clone();
         let left_at_show = Rc::clone(&left_at_enter);
         let pending_done = Rc::clone(&pending_enter);
-        let id = glib::timeout_add_local_once(std::time::Duration::from_millis(delay_ms), move || {
-            *pending_done.borrow_mut() = None;
-            show_on_monitor_only_by_name(&docks_show, &name_show);
-            *left_at_show.borrow_mut() = None;
-        });
+        let id =
+            glib::timeout_add_local_once(std::time::Duration::from_millis(delay_ms), move || {
+                *pending_done.borrow_mut() = None;
+                show_on_monitor_only_by_name(&docks_show, &name_show);
+                *left_at_show.borrow_mut() = None;
+            });
         *pending_enter.borrow_mut() = Some(id);
     });
     // Hotspot leave → cancel any pending delayed show and start the hide

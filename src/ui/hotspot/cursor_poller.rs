@@ -250,7 +250,6 @@ fn handle_visible_dock(ctx: &PollContext<'_>) {
     let keep_visible = s.popover_open || dragging;
     drop(s);
 
-
     // Cursor is at edge of a different monitor — migrate dock there (macOS behavior).
     // Skip the migration if the target monitor has a fullscreen window on its
     // active workspace; hide instead so dragging across screens doesn't flash

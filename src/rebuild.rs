@@ -4,8 +4,11 @@
 //! monitor's dock content. The closure needs to pass *itself* to each button
 //! (so buttons can trigger a rebuild on pin/unpin), which would create an
 //! `Rc` cycle. The cycle is broken with a `Weak` reference stored in a
-//! `Rc<RefCell<Weak<dyn Fn()>>>` holder; buttons upgrade the `Weak` at
-//! call time.
+//! `Rc<RefCell<Weak<dyn Fn()>>>` holder; the closure upgrades the `Weak`
+//! once per rebuild iteration and hands buttons strong clones for that
+//! generation. Those strong clones do form a temporary cycle, but every
+//! rebuild destroys the previous generation's widgets (and main.rs holds
+//! the closure for the process lifetime anyway), so nothing leaks.
 //!
 //! A `running` / `pending` `Cell<bool>` pair guards against reentrancy:
 //! glycin's icon loading uses D-Bus and can pump the GTK main loop, which
@@ -175,6 +178,13 @@ fn rebuild_one_dock(dock: &MonitorDock, ctx: &DockContext) {
 fn schedule_surface_reset(win: &gtk4::ApplicationWindow) {
     let win = win.clone();
     gtk4::glib::idle_add_local_once(move || {
+        // Re-check at dispatch time: autohide or a SIGRTMIN Hide can
+        // legitimately hide the window between the rebuild's visibility
+        // check and this idle — an unconditional show would override
+        // that hide until the next timeout.
+        if !win.is_visible() {
+            return;
+        }
         win.set_visible(false);
         win.set_visible(true);
     });

@@ -154,6 +154,10 @@ setup-hyprland:
 	@echo "exec-once = $(BIN_NAME) -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c \"nwg-drawer --pb-auto\""
 	@echo "#"
 	@echo "# Note: nwg-dock has no runtime dependency on uwsm/systemd; the wrapper is optional."
+	@echo "#"
+	@echo "# Hyprland >= 0.56 + GTK <= 4.22: prefix the command with"
+	@echo "#   env GDK_WAYLAND_DISABLE=zwp_linux_dmabuf_v1"
+	@echo "# to dodge a GTK dmabuf crash on DPMS cycles — see README 'Known issue'."
 
 setup-sway:
 	@echo "# Add to ~/.config/sway/config:"

@@ -53,7 +53,7 @@ pub(crate) fn show_client_menu(
 
     let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 2);
     for instance in instances {
-        let title = truncate_title(&instance.title, 25);
+        let title = truncate_title(&instance.title, crate::ui::constants::MENU_TITLE_MAX_CHARS);
         let label = format!("{} ({})", title, instance.workspace.name);
         let btn = gtk4::Button::with_label(&label);
         btn.add_css_class("flat");
@@ -86,7 +86,7 @@ pub(crate) fn show_context_menu(
 
     // Per-instance actions
     for instance in instances {
-        let title = truncate_title(&instance.title, 25);
+        let title = truncate_title(&instance.title, crate::ui::constants::MENU_TITLE_MAX_CHARS);
         let header = gtk4::Label::new(Some(&format!("{} ({})", title, instance.workspace.name)));
         header.add_css_class("heading");
         vbox.append(&header);

@@ -126,7 +126,13 @@ fn main() {
         }
     }
 
-    let cache_dir = paths::cache_dir().expect("Couldn't determine cache directory");
+    // Log-and-fallback like the data-home path above — a missing
+    // $HOME/$XDG_CACHE_HOME (misconfigured service unit) shouldn't be a
+    // raw panic.
+    let cache_dir = paths::cache_dir().unwrap_or_else(|| {
+        log::error!("Couldn't determine cache directory; falling back to /tmp");
+        PathBuf::from("/tmp")
+    });
     let pinned_file = cache_dir.join("mac-dock-pinned");
     let app_dirs = get_app_dirs();
     let sig_rx = Rc::new(signals::setup_signal_handlers(config.is_resident_mode()));
@@ -393,7 +399,10 @@ fn acquire_singleton_lock(
         Err(existing_pid) => {
             if let Some(pid) = existing_pid {
                 if is_resident {
-                    log::info!("Running instance found (pid {pid}), terminating...");
+                    // We exit; the running instance is left alone. The old
+                    // wording ("terminating...") read as if the OTHER
+                    // process were being killed.
+                    log::info!("Dock already running (pid {pid}); this instance exits");
                 } else {
                     signals::send_signal_to_pid(pid, signals::sig_toggle());
                     log::info!("Sent toggle signal to running instance (pid {pid}), bye!");
@@ -404,12 +413,18 @@ fn acquire_singleton_lock(
     }
 }
 
-/// Checks if a command exists on PATH.
+/// Checks if a command exists on PATH — file AND executable bit, matching
+/// real shell lookup (a plain `is_file` check kept the launcher visible
+/// when a non-executable file shadowed the name).
 fn command_exists(cmd: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
     if let Ok(path) = std::env::var("PATH") {
         for dir in path.split(':') {
             let full = std::path::Path::new(dir).join(cmd);
-            if full.is_file() {
+            if let Ok(meta) = std::fs::metadata(&full)
+                && meta.is_file()
+                && meta.permissions().mode() & 0o111 != 0
+            {
                 return true;
             }
         }

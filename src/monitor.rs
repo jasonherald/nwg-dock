@@ -26,9 +26,16 @@ fn map_outputs_by_connector() -> HashMap<String, gdk::Monitor> {
     for i in 0..model.n_items() {
         if let Some(item) = model.item(i)
             && let Ok(mon) = item.downcast::<gdk::Monitor>()
-            && let Some(name) = mon.connector()
         {
-            result.insert(name.to_string(), mon);
+            match mon.connector() {
+                Some(name) => {
+                    result.insert(name.to_string(), mon);
+                }
+                // Happens during early enumeration/hotplug; the liveness
+                // tick retries, but leave a trail instead of silently
+                // producing a dock with zero windows.
+                None => log::debug!("Skipping monitor {i}: no connector name yet"),
+            }
         }
     }
     result
