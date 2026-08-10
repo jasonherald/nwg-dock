@@ -6,6 +6,7 @@ use crate::ui::constants::{SCALE_STEP_ITEMS, SCALE_THRESHOLD_ITEMS};
 use gtk4::prelude::*;
 use nwg_common::compositor::WmClient;
 use nwg_common::pinning;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -214,6 +215,36 @@ pub(crate) fn build(
     main_box.add_controller(bg_gesture);
 
     main_box
+}
+
+/// Data indices of the pinned entries that render as `.pinned-item`
+/// widgets, in visual order.
+///
+/// SYNC: the skip conditions here MUST mirror `build_pinned_items`
+/// below — an entry skipped there but counted here (or vice versa)
+/// desynchronizes drag-reorder's visual→data index translation and a
+/// drop lands in the wrong slot. Kept adjacent so a change to one is
+/// staring at the other.
+pub(crate) fn visible_pin_indices(
+    state: &Rc<RefCell<DockState>>,
+    pinned: &[String],
+    ignored_classes: &[String],
+) -> Vec<usize> {
+    let mut already_added: Vec<&str> = Vec::new();
+    let mut visible = Vec::new();
+    for (pin_idx, pin) in pinned.iter().enumerate() {
+        if ignored_classes.contains(pin) {
+            continue;
+        }
+        let instances = state.borrow().task_instances(pin);
+        if instances.is_empty() {
+            visible.push(pin_idx);
+        } else if instances.len() == 1 || !already_added.contains(&pin.as_str()) {
+            visible.push(pin_idx);
+            already_added.push(pin.as_str());
+        }
+    }
+    visible
 }
 
 /// Adds pinned items to the dock box, with drag-source support when unlocked.

@@ -42,6 +42,37 @@ pub(crate) enum DiffResult {
     },
 }
 
+impl DiffResult {
+    /// Removes a field from the `applied` list — used when the apply
+    /// step discovers post-diff that a change did not actually land
+    /// (currently: a failed css-file rebind). An `Applicable` result
+    /// whose last applied field is removed degrades to `NoChange` so
+    /// the user isn't told "config reloaded" about a no-op.
+    pub(crate) fn without_applied_field(self, field: &str) -> Self {
+        match self {
+            DiffResult::NoChange => DiffResult::NoChange,
+            DiffResult::Applicable { mut applied } => {
+                applied.retain(|f| *f != field);
+                if applied.is_empty() {
+                    DiffResult::NoChange
+                } else {
+                    DiffResult::Applicable { applied }
+                }
+            }
+            DiffResult::RestartRequired {
+                restart_fields,
+                mut applied,
+            } => {
+                applied.retain(|f| *f != field);
+                DiffResult::RestartRequired {
+                    restart_fields,
+                    applied,
+                }
+            }
+        }
+    }
+}
+
 /// Computes which fields differ between `old` and `new`, classifying
 /// each as restart-required or hot-reloadable, and returns the
 /// appropriate `DiffResult`.
@@ -95,9 +126,17 @@ fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
     cmp!(ico, "ico");
 
     // [filters]
-    cmp!(ignore_classes, "ignore-classes");
+    // ignore-classes diffs on the EFFECTIVE list, not the joined string:
+    // the array and string forms can produce the same joined string with
+    // different semantics (["a b"] vs ["a", "b"]), and only the list is
+    // what consumers act on.
+    if old.ignored_classes() != new.ignored_classes() {
+        all_changed.push("ignore-classes");
+        hot_reloadable.push("ignore-classes");
+    }
     cmp!(ignore_workspaces, "ignore-workspaces");
     cmp!(num_ws, "num-ws");
+    cmp!(ws, "ws");
     cmp!(no_fullscreen_suppress, "no-fullscreen-suppress");
 
     if all_changed.is_empty() {
@@ -189,6 +228,16 @@ pub(crate) fn apply_config_change(
     }
 
     state.borrow_mut().config = Rc::new(next_config);
+
+    // The diff computed `applied` BEFORE apply ran — if the css-file
+    // rebind failed, the field did not actually apply, and reporting
+    // "Applied: css-file" right after the "CSS reload failed"
+    // notification is a contradiction. Correct the list post-hoc.
+    let result = if css_file_applied {
+        result
+    } else {
+        result.without_applied_field("css-file")
+    };
 
     // Single rebuild call covers icon-size, alignment, launcher-cmd,
     // launcher-pos, nolauncher, ico, ignore-classes, ignore-workspaces,

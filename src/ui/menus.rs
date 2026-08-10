@@ -8,7 +8,14 @@ use std::path::Path;
 use std::rc::Rc;
 
 /// Creates a popover that tracks open/close state to prevent autohide.
-fn create_tracked_popover(
+///
+/// Also owns the popover's teardown: GTK4 popovers are manually parented
+/// (`set_parent`) and must be manually unparented — without the deferred
+/// `unparent` below, every menu invocation leaves another dead popover
+/// child on its button until the next rebuild finalizes the button with
+/// children still attached ("Finalizing GtkButton … still has children
+/// left: GtkPopover").
+pub(crate) fn create_tracked_popover(
     parent: &impl IsA<gtk4::Widget>,
     state: &Rc<RefCell<DockState>>,
 ) -> gtk4::Popover {
@@ -20,8 +27,17 @@ fn create_tracked_popover(
         state_open.borrow_mut().popover_open = true;
     });
     let state_close = Rc::clone(state);
-    popover.connect_closed(move |_| {
+    popover.connect_closed(move |p| {
         state_close.borrow_mut().popover_open = false;
+        // Deferred: unparenting during the `closed` emission itself is
+        // undefined-adjacent in GTK. The parent may already be gone if a
+        // rebuild destroyed the button before this idle runs.
+        let p = p.clone();
+        gtk4::glib::idle_add_local_once(move || {
+            if p.parent().is_some() {
+                p.unparent();
+            }
+        });
     });
     popover
 }

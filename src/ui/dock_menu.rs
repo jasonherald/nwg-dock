@@ -14,8 +14,11 @@ pub(crate) fn show_dock_background_menu(
     click_x: i32,
     click_y: i32,
 ) {
-    let popover = gtk4::Popover::new();
-    popover.set_parent(parent.upcast_ref());
+    // Tracked popover: sets `popover_open` while shown (so autohide
+    // can't hide the dock underneath the open menu — this menu
+    // previously used a raw Popover and lost that guarantee) and
+    // unparents itself after close.
+    let popover = crate::ui::menus::create_tracked_popover(parent, state);
     popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(click_x, click_y, 1, 1)));
 
     let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 4);

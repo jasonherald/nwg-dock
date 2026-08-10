@@ -40,6 +40,9 @@ pub(super) fn start_cursor_poller(
             }
         }));
     let monitor_refresh_counter = Rc::new(RefCell::new(0u32));
+    // When the cursor first arrived at the reveal edge — drives the
+    // `hotspot_delay` dwell requirement before showing the dock.
+    let edge_since: Rc<RefCell<Option<std::time::Instant>>> = Rc::new(RefCell::new(None));
     let last_outputs: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(
         docks
             .borrow()
@@ -63,6 +66,13 @@ pub(super) fn start_cursor_poller(
             let position = cfg.position;
             let hide_timeout = cfg.hide_timeout;
             let suppress_on_fullscreen = !cfg.no_fullscreen_suppress;
+            let hotspot_delay_ms = cfg.hotspot_delay.max(0) as u64;
+
+            // Dwell bookkeeping: the moment the cursor is away from the
+            // reveal edge, the dwell clock resets.
+            if !is_cursor_at_edge(&cursor, &cached_monitors.borrow(), position) {
+                *edge_since.borrow_mut() = None;
+            }
 
             // Detect topology change: output names changed means reconciliation happened
             let current_outputs: Vec<String> = docks
@@ -106,6 +116,8 @@ pub(super) fn start_cursor_poller(
                 left_at: &left_at,
                 suppress_on_fullscreen,
                 hide_timeout,
+                hotspot_delay_ms,
+                edge_since: &edge_since,
             };
 
             if !any_visible {
@@ -135,12 +147,30 @@ struct PollContext<'a> {
     left_at: &'a Rc<RefCell<Option<std::time::Instant>>>,
     suppress_on_fullscreen: bool,
     hide_timeout: u64,
+    /// `hotspot_delay` from live config: how long the cursor must dwell
+    /// at the reveal edge before the dock shows.
+    hotspot_delay_ms: u64,
+    /// When the cursor first arrived at the reveal edge (None = away).
+    edge_since: &'a Rc<RefCell<Option<std::time::Instant>>>,
+}
+
+/// True once the cursor has dwelt at the reveal edge for `hotspot_delay`.
+/// One poll interval is credited so delays at or below the tick length —
+/// including the Go-parity default of 20 ms — reveal on the first tick,
+/// preserving the pre-dwell behavior for small values.
+fn edge_dwell_satisfied(ctx: &PollContext<'_>) -> bool {
+    let mut since = ctx.edge_since.borrow_mut();
+    let arrived = since.get_or_insert_with(std::time::Instant::now);
+    arrived.elapsed().as_millis() as u64 + CURSOR_POLL_INTERVAL_MS >= ctx.hotspot_delay_ms
 }
 
 /// Handles cursor polling when the dock is hidden: shows the dock if cursor is at edge.
 /// Skips showing if a fullscreen window occupies the target monitor (issue #54).
 fn handle_hidden_dock(ctx: &PollContext<'_>) {
     if !is_cursor_at_edge(ctx.cursor, ctx.monitors, ctx.position) {
+        return;
+    }
+    if !edge_dwell_satisfied(ctx) {
         return;
     }
     let Some(mon_name) = find_cursor_monitor_name(ctx.cursor, ctx.monitors) else {
@@ -165,14 +195,23 @@ fn handle_hidden_dock(ctx: &PollContext<'_>) {
 /// IPC calls are acceptable. On query failure we return false — better to
 /// briefly flash the dock than to permanently suppress it from a stale read.
 fn fresh_fullscreen_check(ctx: &PollContext<'_>, monitor_name: &str) -> bool {
-    let fresh_monitors = match ctx.compositor.list_monitors() {
+    compositor_fullscreen_check(ctx.compositor, monitor_name)
+}
+
+/// Compositor-querying half of the fullscreen check, shared with the
+/// Sway hotspot path (`hotspot_windows`), which has no `PollContext`.
+pub(super) fn compositor_fullscreen_check(
+    compositor: &Rc<dyn Compositor>,
+    monitor_name: &str,
+) -> bool {
+    let fresh_monitors = match compositor.list_monitors() {
         Ok(m) => m,
         Err(e) => {
             log::debug!("Fresh monitor query for fullscreen check failed: {e}");
             return false;
         }
     };
-    let fresh_clients = match ctx.compositor.list_clients() {
+    let fresh_clients = match compositor.list_clients() {
         Ok(c) => c,
         Err(e) => {
             log::debug!("Fresh client query for fullscreen check failed: {e}");
@@ -211,7 +250,6 @@ fn handle_visible_dock(ctx: &PollContext<'_>) {
     let keep_visible = s.popover_open || dragging;
     drop(s);
 
-    update_drag_state(ctx.state, dragging, in_dock_area, at_edge);
 
     // Cursor is at edge of a different monitor — migrate dock there (macOS behavior).
     // Skip the migration if the target monitor has a fullscreen window on its
@@ -220,6 +258,7 @@ fn handle_visible_dock(ctx: &PollContext<'_>) {
     if at_edge
         && !in_dock_area
         && !keep_visible
+        && edge_dwell_satisfied(ctx)
         && let Some(mon_name) = find_cursor_monitor_name(ctx.cursor, ctx.monitors)
     {
         if ctx.suppress_on_fullscreen && fresh_fullscreen_check(ctx, &mon_name) {
@@ -266,21 +305,13 @@ fn handle_visible_dock(ctx: &PollContext<'_>) {
 
 use super::show_on_monitor_only_by_name;
 
-/// Tracks whether cursor is outside dock during a drag operation.
-fn update_drag_state(
-    state: &Rc<RefCell<DockState>>,
-    dragging: bool,
-    in_dock_area: bool,
-    at_edge: bool,
-) {
-    if dragging {
-        let was_outside = state.borrow().is_drag_outside_dock();
-        let now_outside = !in_dock_area && !at_edge;
-        if was_outside != now_outside {
-            state.borrow_mut().set_drag_outside(now_outside);
-        }
-    }
-}
+// NOTE: `drag_outside_dock` is written by drag.rs's motion handler ONLY.
+// The poller used to also write it from global cursor-vs-window bounds,
+// which disagrees with the motion handler's cross-axis geometry (drag
+// along the dock past its end: motion says inside, bounds say outside) —
+// whichever writer's tick landed last decided unpin at release, and it
+// could contradict the removal indicator the user was shown. One writer,
+// one geometry: the indicator and the release decision always agree.
 
 /// Starts or checks the hide timer, hiding all dock windows when expired.
 fn check_hide_timer(

@@ -103,12 +103,7 @@ fn main() {
         std::process::exit(0);
     }
 
-    if config.autohide && config.resident {
-        log::warn!("autohide and resident are mutually exclusive, ignoring -d!");
-        config.autohide = false;
-    }
-
-    auto_detect_launcher(&mut config);
+    normalize_config(&mut config);
     let compositor: Rc<dyn nwg_common::compositor::Compositor> =
         Rc::from(nwg_common::compositor::init_or_null(config.wm));
     let _lock = acquire_singleton_lock("mac-dock", config.multi, config.is_resident_mode());
@@ -136,8 +131,15 @@ fn main() {
     let app_dirs = get_app_dirs();
     let sig_rx = Rc::new(signals::setup_signal_handlers(config.is_resident_mode()));
 
+    // NON_UNIQUE: instance management belongs to our singleton lock
+    // (acquire_singleton_lock above — pidfile with stale detection and a
+    // -m/--multi escape hatch). GApplication's D-Bus uniqueness would
+    // fight it: a second `-m` process would remote-activate the primary
+    // (running activate_dock a second time there — duplicate listeners
+    // and dock windows) and exit, instead of running its own dock.
     let app = gtk4::Application::builder()
         .application_id("com.mac-dock.hyprland")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
     let bootstrap = Rc::new(DockBootstrap {
@@ -243,11 +245,7 @@ fn activate_dock(app: &gtk4::Application, params: &DockBootstrap) {
     } else {
         None
     };
-    events::start_event_listener(
-        Rc::clone(&state),
-        Rc::clone(&rebuild),
-        params.compositor.as_ref(),
-    );
+    events::start_event_listener(Rc::clone(&state), Rc::clone(&rebuild), &params.compositor);
     listeners::setup_pin_watcher(&params.pinned_file, &rebuild, &state);
     listeners::setup_signal_poller(app, &per_monitor, &params.sig_rx);
 
@@ -320,7 +318,10 @@ fn on_config_save(
             return;
         }
     };
-    let new = config_file::merge(&matches, cli_snapshot, raw);
+    let mut new = config_file::merge(&matches, cli_snapshot, raw);
+    // Same normalizations as cold start — the diff below compares
+    // against the live config, which has them applied.
+    normalize_config(&mut new);
 
     let result = config_file::apply_config_change(new, state, per_monitor, rebuild);
 
@@ -350,6 +351,20 @@ fn on_config_save(
             config_file::notify_user("nwg-dock: config reloaded", &body);
         }
     }
+}
+
+/// Post-merge normalizations applied to every effective config — cold
+/// start AND hot reload must both run this. Reload diffs compare the
+/// candidate against the live (already-normalized) config, so skipping
+/// it on reload manufactures phantom diffs: `-d -r` users got a spurious
+/// "Restart required for: autohide" on every save, and a launcher hidden
+/// because its command is missing came back on any unrelated edit.
+fn normalize_config(config: &mut DockConfig) {
+    if config.autohide && config.resident {
+        log::warn!("autohide and resident are mutually exclusive, ignoring -d!");
+        config.autohide = false;
+    }
+    auto_detect_launcher(config);
 }
 
 /// Auto-detect launcher: hide button if command not found on PATH.
@@ -417,7 +432,12 @@ fn build_wm_class_map(app_dirs: &[PathBuf]) -> HashMap<String, String> {
                 .to_string();
             match nwg_common::desktop::entry::parse_desktop_file(&id, &path) {
                 Ok(entry) if !entry.startup_wm_class.is_empty() => {
-                    map.insert(entry.startup_wm_class.to_lowercase(), id);
+                    // First wins: get_app_dirs() returns the user data dir
+                    // before system/flatpak dirs, and XDG precedence says
+                    // the user's .desktop entry overrides later ones. A
+                    // plain insert would invert that (last writer wins).
+                    map.entry(entry.startup_wm_class.to_lowercase())
+                        .or_insert(id);
                 }
                 Ok(_) => {} // no StartupWMClass — skip
                 Err(e) => log::warn!("Failed to parse {}: {}", path.display(), e),

@@ -33,15 +33,18 @@ const EVENT_POLL_INTERVAL_MS: u64 = 100;
 /// doesn't change the client list, but the workspace switcher row needs to
 /// redraw with the new active button class. So if any workspace event drained,
 /// we force a rebuild (deferred during drag, like the client-list path).
+/// Returns `true` when both channel senders are gone — i.e. the event
+/// thread died — so the poller can attempt a reconnect.
 fn poll_and_rebuild(
     receiver: &mpsc::Receiver<String>,
     workspace_receiver: &mpsc::Receiver<()>,
     state: &Rc<RefCell<DockState>>,
     rebuild_fn: &Rc<dyn Fn()>,
-) {
+) -> bool {
     let dragging = state.borrow().is_drag_pending() || state.borrow().drag_source_index().is_some();
-    let workspace_changed = drain_workspace_events(workspace_receiver);
-    let client_changed = drain_new_events(receiver) && needs_rebuild(state);
+    let (workspace_changed, ws_dead) = drain_workspace_events(workspace_receiver);
+    let (any_event, clients_dead) = drain_new_events(receiver);
+    let client_changed = any_event && needs_rebuild(state);
 
     if client_changed {
         // Cancel launch animations for apps that now have windows
@@ -58,15 +61,21 @@ fn poll_and_rebuild(
         state.borrow_mut().rebuild_pending = false;
         rebuild_fn();
     }
+
+    ws_dead && clients_dead
 }
 
-/// Drains workspace-changed events and returns true if at least one arrived.
-fn drain_workspace_events(receiver: &mpsc::Receiver<()>) -> bool {
+/// Drains workspace-changed events. Returns (at least one arrived,
+/// channel disconnected).
+fn drain_workspace_events(receiver: &mpsc::Receiver<()>) -> (bool, bool) {
     let mut changed = false;
-    while receiver.try_recv().is_ok() {
-        changed = true;
+    loop {
+        match receiver.try_recv() {
+            Ok(()) => changed = true,
+            Err(mpsc::TryRecvError::Empty) => return (changed, false),
+            Err(mpsc::TryRecvError::Disconnected) => return (changed, true),
+        }
     }
-    changed
 }
 
 /// Drains pending window-change events and returns true if at least one
@@ -82,49 +91,49 @@ fn drain_workspace_events(receiver: &mpsc::Receiver<()>) -> bool {
 /// client class list after an IPC refresh, so it's the authoritative
 /// "do we actually need to rebuild" check — an extra `list_clients`
 /// call per focus event is a cheap price for correctness.
-fn drain_new_events(receiver: &mpsc::Receiver<String>) -> bool {
+fn drain_new_events(receiver: &mpsc::Receiver<String>) -> (bool, bool) {
     let mut changed = false;
-    while let Ok(win_addr) = receiver.try_recv() {
-        if !win_addr.contains(">>") {
-            changed = true;
+    loop {
+        match receiver.try_recv() {
+            Ok(win_addr) => {
+                if !win_addr.contains(">>") {
+                    changed = true;
+                }
+            }
+            Err(mpsc::TryRecvError::Empty) => return (changed, false),
+            Err(mpsc::TryRecvError::Disconnected) => return (changed, true),
         }
     }
-    changed
 }
 
 /// Snapshots old client state, refreshes from compositor, and returns
 /// whether the client list or active window changed (requiring a rebuild).
+///
+/// Compares (id, class) pairs, not classes alone: task buttons capture
+/// window IDs at build time, so a same-class close+reopen coalesced into
+/// one poll (app crash + supervisor respawn) must still rebuild — with a
+/// class-only diff the buttons keep pointing at the dead window.
 fn needs_rebuild(state: &Rc<RefCell<DockState>>) -> bool {
-    let old_classes: Vec<String> = state
-        .borrow()
-        .clients
-        .iter()
-        .map(|c| c.class.clone())
-        .collect();
-    let old_active = state
-        .borrow()
-        .active_client
-        .as_ref()
-        .map(|c| c.class.clone());
+    fn snapshot(state: &Rc<RefCell<DockState>>) -> (Vec<(String, String)>, Option<String>) {
+        let s = state.borrow();
+        let clients = s
+            .clients
+            .iter()
+            .map(|c| (c.id.clone(), c.class.clone()))
+            .collect();
+        let active = s.active_client.as_ref().map(|c| c.id.clone());
+        (clients, active)
+    }
+
+    let (old_clients, old_active) = snapshot(state);
 
     if let Err(e) = state.borrow_mut().refresh_clients() {
         log::error!("Failed to refresh clients: {e}");
         return false;
     }
 
-    let new_classes: Vec<String> = state
-        .borrow()
-        .clients
-        .iter()
-        .map(|c| c.class.clone())
-        .collect();
-    let new_active = state
-        .borrow()
-        .active_client
-        .as_ref()
-        .map(|c| c.class.clone());
-
-    old_classes != new_classes || old_active != new_active
+    let (new_clients, new_active) = snapshot(state);
+    old_clients != new_clients || old_active != new_active
 }
 
 /// Spawns the background event-stream drain thread.
@@ -174,11 +183,45 @@ fn install_event_poller(
     workspace_receiver: mpsc::Receiver<()>,
     state: Rc<RefCell<DockState>>,
     rebuild_fn: Rc<dyn Fn()>,
+    compositor: Rc<dyn Compositor>,
 ) {
+    // Reconnect attempt cadence when the event thread has died: every
+    // ~3 s (30 ticks at the 100 ms poll interval). One transient IPC
+    // error (compositor reload) previously killed compositor-event
+    // reactivity for the rest of the process lifetime.
+    const RECONNECT_INTERVAL_TICKS: u32 = 30;
+
+    let mut receiver = receiver;
+    let mut workspace_receiver = workspace_receiver;
+    let mut ticks_until_reconnect: u32 = 0;
+
     glib::timeout_add_local(
         std::time::Duration::from_millis(EVENT_POLL_INTERVAL_MS),
         move || {
-            poll_and_rebuild(&receiver, &workspace_receiver, &state, &rebuild_fn);
+            let thread_dead =
+                poll_and_rebuild(&receiver, &workspace_receiver, &state, &rebuild_fn);
+
+            if thread_dead {
+                if ticks_until_reconnect == 0 {
+                    ticks_until_reconnect = RECONNECT_INTERVAL_TICKS;
+                    match compositor.event_stream() {
+                        Ok(stream) => {
+                            log::info!("Compositor event stream reconnected");
+                            let (sender, new_receiver) = mpsc::channel::<String>();
+                            let (ws_sender, new_ws_receiver) = mpsc::channel::<()>();
+                            spawn_event_thread(stream, sender, ws_sender);
+                            receiver = new_receiver;
+                            workspace_receiver = new_ws_receiver;
+                        }
+                        Err(e) => {
+                            log::debug!("Event stream reconnect failed (will retry): {e}");
+                        }
+                    }
+                } else {
+                    ticks_until_reconnect -= 1;
+                }
+            }
+
             glib::ControlFlow::Continue
         },
     );
@@ -191,7 +234,7 @@ fn install_event_poller(
 pub(crate) fn start_event_listener(
     state: Rc<RefCell<DockState>>,
     rebuild_fn: Rc<dyn Fn()>,
-    compositor: &dyn Compositor,
+    compositor: &Rc<dyn Compositor>,
 ) {
     let (sender, receiver) = mpsc::channel::<String>();
     let (ws_sender, ws_receiver) = mpsc::channel::<()>();
@@ -206,7 +249,7 @@ pub(crate) fn start_event_listener(
     };
 
     spawn_event_thread(stream, sender, ws_sender);
-    install_event_poller(receiver, ws_receiver, state, rebuild_fn);
+    install_event_poller(receiver, ws_receiver, state, rebuild_fn, Rc::clone(compositor));
 }
 
 #[cfg(test)]
@@ -217,14 +260,14 @@ mod tests {
     #[test]
     fn empty_channel_returns_false() {
         let (_tx, rx) = mpsc::channel::<String>();
-        assert!(!drain_new_events(&rx));
+        assert!(!drain_new_events(&rx).0);
     }
 
     #[test]
     fn single_event_returns_true() {
         let (tx, rx) = mpsc::channel::<String>();
         tx.send("0xdeadbeef".to_string()).unwrap();
-        assert!(drain_new_events(&rx));
+        assert!(drain_new_events(&rx).0);
     }
 
     /// Regression for issue #62: the previous dedup compared each event's
@@ -243,10 +286,10 @@ mod tests {
         let (tx, rx) = mpsc::channel::<String>();
 
         tx.send("0xabc".to_string()).unwrap();
-        assert!(drain_new_events(&rx));
+        assert!(drain_new_events(&rx).0);
 
         tx.send("0xabc".to_string()).unwrap();
-        assert!(drain_new_events(&rx));
+        assert!(drain_new_events(&rx).0);
     }
 
     /// Hyprland's event socket occasionally emits lines that contain `>>`
@@ -257,7 +300,7 @@ mod tests {
         let (tx, rx) = mpsc::channel::<String>();
         tx.send("workspace>>2".to_string()).unwrap();
         tx.send("monitorremoved>>HDMI-A-1".to_string()).unwrap();
-        assert!(!drain_new_events(&rx));
+        assert!(!drain_new_events(&rx).0);
     }
 
     /// Mix of real and redirect events — a single real event is enough
@@ -268,6 +311,6 @@ mod tests {
         tx.send("workspace>>2".to_string()).unwrap();
         tx.send("0xdeadbeef".to_string()).unwrap();
         tx.send("submap>>default".to_string()).unwrap();
-        assert!(drain_new_events(&rx));
+        assert!(drain_new_events(&rx).0);
     }
 }

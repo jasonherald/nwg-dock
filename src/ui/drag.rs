@@ -277,6 +277,22 @@ fn reorder_pinned(
     pinned_path: &Path,
     rebuild: &Rc<dyn Fn()>,
 ) {
+    // `current_index` is a VISUAL position among the other rendered
+    // `.pinned-item` widgets — but entries hidden by ignore-classes (or
+    // deduplicated) make the data list longer than the visual row, so it
+    // cannot be used directly as a data insertion index (a reorder next
+    // to a hidden pin landed in the wrong slot or silently reverted).
+    // Translate through the shared visibility mapping first.
+    let (pinned_snapshot, ignored) = {
+        let st = state.borrow();
+        (st.pinned.clone(), st.config.ignored_classes())
+    };
+    let other_visible: Vec<usize> =
+        crate::ui::dock_box::visible_pin_indices(state, &pinned_snapshot, &ignored)
+            .into_iter()
+            .filter(|&i| i != session.source_index)
+            .collect();
+
     let mut st = state.borrow_mut();
     let pinned_len = st.pinned.len();
     if session.source_index >= pinned_len {
@@ -286,10 +302,20 @@ fn reorder_pinned(
     // Remove from original position
     let item = st.pinned.remove(session.source_index);
 
-    // current_index is where the item sits visually among the OTHER items
-    // (excluding itself). After remove, the array has pinned_len - 1 elements.
-    // current_index is already correct as an insertion point.
-    let insert_at = session.current_index.min(st.pinned.len());
+    // Visual insertion slot v means "before the item visually at v"
+    // (among the others); past-the-end means append. Data indices after
+    // the removal shift down by one for entries beyond source_index.
+    let insert_at = match other_visible.get(session.current_index) {
+        Some(&target_data_idx) => {
+            if target_data_idx > session.source_index {
+                target_data_idx - 1
+            } else {
+                target_data_idx
+            }
+        }
+        None => st.pinned.len(),
+    }
+    .min(st.pinned.len());
     st.pinned.insert(insert_at, item);
 
     if let Err(e) = pinning::save_pinned(&st.pinned, pinned_path) {
