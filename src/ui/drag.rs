@@ -134,24 +134,52 @@ pub(crate) fn setup_drag_gesture(
     let pinned_path = pinned_file.to_path_buf();
     let rebuild = Rc::clone(rebuild);
     gesture.connect_drag_end(move |_gesture, _offset_x, _offset_y| {
-        let sess = session_end.borrow_mut().take();
-        let Some(s) = sess else { return };
-
+        let Some(s) = abort_drag_session(&state_end, &session_end) else {
+            return;
+        };
         let outside = state_end.borrow().is_drag_outside_dock();
-
-        // Clear drag state — end_drag resets all three coupled fields
-        state_end.borrow_mut().end_drag();
-
-        // Restore cursor and visuals
-        if let Some(root) = s.dock_box.root() {
-            root.upcast_ref::<gtk4::Widget>().set_cursor(None);
-        }
-        update_removal_indicator(&s.source_item, false, 0);
-
         finalize_drag(&state_end, &s, outside, &pinned_path, &rebuild);
     });
 
+    // --- cancel: clean up without persisting anything ---
+    // GTK cancels a sequence without emitting drag-end when the grab
+    // breaks or the widget is destroyed mid-press (e.g. a rebuild fired
+    // by the pin watcher or monitor reconcile tears the button down).
+    // Without this handler, `drag_pending` set in drag-begin leaks true
+    // — wedging autohide and deferring event-driven rebuilds — and a
+    // later drag-end against a rebuilt layout could persist a reorder
+    // computed from stale indices. Cancel = abort: state and visuals
+    // reset, nothing written.
+    let state_cancel = Rc::clone(state);
+    let session_cancel = Rc::clone(&session);
+    gesture.connect_cancel(move |_gesture, _sequence| {
+        abort_drag_session(&state_cancel, &session_cancel);
+    });
+
     button.add_controller(gesture);
+}
+
+/// Shared teardown for drag-end and cancel: takes the session, clears the
+/// coupled drag flags, and restores cursor + removal indicator. Returns
+/// the taken session so drag-end can additionally finalize (persist);
+/// cancel discards it.
+fn abort_drag_session(
+    state: &Rc<RefCell<DockState>>,
+    session: &Rc<RefCell<Option<DragSession>>>,
+) -> Option<DragSession> {
+    let sess = session.borrow_mut().take();
+
+    // Clear drag state even when no session exists — drag-begin sets
+    // `drag_pending` before the session is created, so an early-guard
+    // bail can leave the flag set with `sess == None`.
+    state.borrow_mut().end_drag();
+
+    let s = sess?;
+    if let Some(root) = s.dock_box.root() {
+        root.upcast_ref::<gtk4::Widget>().set_cursor(None);
+    }
+    update_removal_indicator(&s.source_item, false, 0);
+    Some(s)
 }
 
 // ---------------------------------------------------------------------------

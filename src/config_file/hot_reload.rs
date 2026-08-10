@@ -13,6 +13,13 @@ pub(super) const RESTART_REQUIRED_FIELDS: &[&str] = &[
     "hotspot-layer",
     "layer",
     "exclusive",
+    // Layer-shell anchors are set once at window creation and nothing in
+    // the reconcile path observes these (needs_reconcile compares monitor
+    // names and surface validity only), so "hot-reloading" them produced
+    // a split-brain dock: the cursor poller switched to the new edge
+    // while the windows stayed anchored to the old one.
+    "position",
+    "full",
 ];
 
 /// Outcome of comparing the live `DockConfig` against a freshly-merged
@@ -185,10 +192,11 @@ pub(crate) fn apply_config_change(
 
     // Single rebuild call covers icon-size, alignment, launcher-cmd,
     // launcher-pos, nolauncher, ico, ignore-classes, ignore-workspaces,
-    // num-ws, no-fullscreen-suppress, launch-animation. position, full,
-    // and output changes that require window recreate are picked up by
-    // reconcile_monitors via the GDK monitor watcher (or the liveness
-    // tick) the next time it fires.
+    // num-ws, no-fullscreen-suppress, launch-animation. `output` changes
+    // are picked up by the liveness tick (resolve_monitors returns a
+    // different set, which needs_reconcile observes). `position` and
+    // `full` are restart-required: window anchors are set once at
+    // creation and nothing in the reconcile path observes them.
     rebuild();
 
     result
@@ -372,6 +380,25 @@ mod tests {
         let a = cfg(&["test"]);
         let b = cfg(&["test"]);
         assert!(matches!(diff_config(&a, &b), DiffResult::NoChange));
+    }
+
+    #[test]
+    fn diff_position_and_full_are_restart_required() {
+        // Regression: these were classified hot-reloadable, but layer-shell
+        // anchors are set once at window creation and nothing re-anchors on
+        // reload — the poller switched edges while the windows stayed put.
+        let a = cfg(&["test"]);
+        let b = cfg(&["test", "-p", "left", "-f"]);
+        match diff_config(&a, &b) {
+            DiffResult::RestartRequired { restart_fields, .. } => {
+                assert!(
+                    restart_fields.contains(&"position"),
+                    "got: {restart_fields:?}"
+                );
+                assert!(restart_fields.contains(&"full"), "got: {restart_fields:?}");
+            }
+            other => panic!("expected RestartRequired, got {other:?}"),
+        }
     }
 
     #[test]

@@ -219,7 +219,7 @@ fn activate_dock(app: &gtk4::Application, params: &DockBootstrap) {
     let docks = dock_windows::create_dock_windows(app, &monitors, &params.config);
     let per_monitor = Rc::new(RefCell::new(docks));
 
-    let rebuild = rebuild::create_rebuild_fn(
+    let (rebuild, rebuild_running) = rebuild::create_rebuild_fn(
         &per_monitor,
         &state,
         &params.data_home,
@@ -248,7 +248,7 @@ fn activate_dock(app: &gtk4::Application, params: &DockBootstrap) {
         Rc::clone(&rebuild),
         params.compositor.as_ref(),
     );
-    listeners::setup_pin_watcher(&params.pinned_file, &rebuild);
+    listeners::setup_pin_watcher(&params.pinned_file, &rebuild, &state);
     listeners::setup_signal_poller(app, &per_monitor, &params.sig_rx);
 
     let reconcile_ctx = Rc::new(listeners::ReconcileContext {
@@ -256,6 +256,7 @@ fn activate_dock(app: &gtk4::Application, params: &DockBootstrap) {
         per_monitor: Rc::clone(&per_monitor),
         state: Rc::clone(&state),
         rebuild_fn: Rc::clone(&rebuild),
+        rebuild_running,
         hotspot_ctx,
     });
     listeners::setup_monitor_watcher(Rc::clone(&reconcile_ctx));

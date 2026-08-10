@@ -48,24 +48,37 @@ pub(crate) struct ReconcileContext {
     pub(crate) per_monitor: Rc<RefCell<Vec<MonitorDock>>>,
     pub(crate) state: Rc<RefCell<DockState>>,
     pub(crate) rebuild_fn: Rc<dyn Fn()>,
+    /// True while a rebuild is iterating `per_monitor` (shared borrow held
+    /// across the glycin main-loop pump). Reconcile must not take
+    /// `borrow_mut()` while set — see `reconcile_monitors`.
+    pub(crate) rebuild_running: Rc<std::cell::Cell<bool>>,
     pub(crate) hotspot_ctx: Option<Rc<crate::ui::hotspot::HotspotContext>>,
 }
 
 /// Sets up an inotify-based pin file watcher that triggers a rebuild
 /// when the pin file is modified (e.g. by the drawer).
-pub(crate) fn setup_pin_watcher(pinned_file: &Path, rebuild: &Rc<dyn Fn()>) {
+///
+/// The watch is on the pin file's *parent directory* (so the
+/// subscription survives atomic-rename saves), which makes the path
+/// filter below load-bearing: the parent is `~/.cache`, one of the
+/// busiest directories on a desktop, and without the filter every
+/// unrelated cache write from any app rebuilds the dock.
+pub(crate) fn setup_pin_watcher(
+    pinned_file: &Path,
+    rebuild: &Rc<dyn Fn()>,
+    state: &Rc<RefCell<DockState>>,
+) {
     let pin_path = pinned_file.to_path_buf();
     let rebuild = Rc::clone(rebuild);
+    let state = Rc::clone(state);
     let (tx, rx) = mpsc::channel();
 
     std::thread::spawn(move || {
         let tx = tx;
+        let watched_file = pin_path.clone();
         let mut watcher = match notify::recommended_watcher(move |res: Result<notify::Event, _>| {
             if let Ok(event) = res
-                && matches!(
-                    event.kind,
-                    notify::EventKind::Modify(_) | notify::EventKind::Create(_)
-                )
+                && pin_event_matches(&event, &watched_file)
             {
                 let _ = tx.send(()); // Non-critical: receiver may have dropped
             }
@@ -98,9 +111,50 @@ pub(crate) fn setup_pin_watcher(pinned_file: &Path, rebuild: &Rc<dyn Fn()>) {
         std::thread::park();
     });
 
+    setup_pin_poll_timer(rx, rebuild, state);
+}
+
+/// True when an inotify event is a modification/creation of the pin file
+/// itself. The directory watch delivers events for EVERY child of the
+/// pin file's parent (`~/.cache`), so both the kind and the path filter
+/// are required — without the path check, any application writing any
+/// cache file triggers a full dock rebuild.
+fn pin_event_matches(event: &notify::Event, pin_file: &Path) -> bool {
+    matches!(
+        event.kind,
+        notify::EventKind::Modify(_) | notify::EventKind::Create(_)
+    ) && event.paths.iter().any(|p| p == pin_file)
+}
+
+/// Drains watcher notices on a 50 ms timer and fires `rebuild`, deferring
+/// while a drag is in progress (rebuilding mid-drag destroys the dragged
+/// button and its live gesture).
+fn setup_pin_poll_timer(
+    rx: mpsc::Receiver<()>,
+    rebuild: Rc<dyn Fn()>,
+    state: Rc<RefCell<DockState>>,
+) {
+    // `deferred` carries a change notice across ticks while a drag is in
+    // progress: rebuilding mid-drag would destroy the dragged button and
+    // its live gesture (the event poller has the same deferral; see
+    // events.rs `poll_and_rebuild`).
+    let deferred = std::cell::Cell::new(false);
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        if rx.try_recv().is_ok() {
-            while rx.try_recv().is_ok() {} // drain
+        match rx.try_recv() {
+            Ok(()) => {
+                while rx.try_recv().is_ok() {} // drain
+                deferred.set(true);
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => {
+                // Watcher thread died at startup (watch() failed) — the
+                // warn was already logged there; stop the now-pointless
+                // 20 Hz poll instead of ticking for the process lifetime.
+                return glib::ControlFlow::Break;
+            }
+        }
+        if deferred.get() && !state.borrow().is_drag_pending() {
+            deferred.set(false);
             log::debug!("Pin file changed, rebuilding dock");
             rebuild();
         }
@@ -179,6 +233,16 @@ pub(crate) fn setup_monitor_watcher(ctx: Rc<ReconcileContext>) {
 /// so log messages can clearly distinguish "compositor destroyed our surface"
 /// (a recovery) from "user unplugged a monitor" (a topology change).
 fn reconcile_monitors(ctx: &ReconcileContext) {
+    // A rebuild in flight holds a shared borrow on `per_monitor` across
+    // dock_box::build, which pumps the GTK main loop (glycin icon
+    // loading) — and this function is dispatched from idle/timeout
+    // callbacks that run during exactly that pump. Taking `borrow_mut()`
+    // below would panic. Skip; the liveness tick re-detects any real
+    // drift within ~2s of the rebuild finishing.
+    if ctx.rebuild_running.get() {
+        log::debug!("Reconcile requested mid-rebuild — deferring to liveness tick");
+        return;
+    }
     // Read live config from state — hot-reload may have swapped it in.
     let cfg = ctx.state.borrow().config.clone();
     let hotspot_ctx = ctx.hotspot_ctx.as_deref();
@@ -466,10 +530,56 @@ fn add_new_docks(
 
 #[cfg(test)]
 mod tests {
-    use super::{combine_add_lists, decide_reconcile, zombie_names};
+    use super::{combine_add_lists, decide_reconcile, pin_event_matches, zombie_names};
 
     fn names(s: &[&str]) -> Vec<String> {
         s.iter().map(|x| (*x).to_string()).collect()
+    }
+
+    // ─── pin_event_matches: directory-watch path filtering ─────────────────────
+
+    fn modify_event(paths: &[&str]) -> notify::Event {
+        notify::Event {
+            kind: notify::EventKind::Modify(notify::event::ModifyKind::Any),
+            paths: paths.iter().map(std::path::PathBuf::from).collect(),
+            attrs: Default::default(),
+        }
+    }
+
+    #[test]
+    fn pin_event_matches_the_pin_file() {
+        let pin = std::path::Path::new("/home/u/.cache/mac-dock-pinned");
+        assert!(pin_event_matches(
+            &modify_event(&["/home/u/.cache/mac-dock-pinned"]),
+            pin
+        ));
+    }
+
+    #[test]
+    fn pin_event_ignores_sibling_cache_files() {
+        // The watch is on ~/.cache itself; unrelated children must not
+        // trigger a rebuild (regression: every cache write from any app
+        // rebuilt the dock).
+        let pin = std::path::Path::new("/home/u/.cache/mac-dock-pinned");
+        assert!(!pin_event_matches(
+            &modify_event(&["/home/u/.cache/some-other-app.db"]),
+            pin
+        ));
+        assert!(!pin_event_matches(
+            &modify_event(&["/home/u/.cache/nwg-dock-locked"]),
+            pin
+        ));
+    }
+
+    #[test]
+    fn pin_event_ignores_non_modify_kinds() {
+        let pin = std::path::Path::new("/home/u/.cache/mac-dock-pinned");
+        let ev = notify::Event {
+            kind: notify::EventKind::Access(notify::event::AccessKind::Read),
+            paths: vec![pin.to_path_buf()],
+            attrs: Default::default(),
+        };
+        assert!(!pin_event_matches(&ev, pin));
     }
 
     // ─── decide_reconcile: steady-state and basic cases ────────────────────────

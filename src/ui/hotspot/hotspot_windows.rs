@@ -67,8 +67,9 @@ pub(super) fn start_hotspot_windows(
     app: &gtk4::Application,
 ) -> Rc<HotspotContext> {
     // `position` is a one-shot setup value — hotspot windows are created
-    // anchored to this edge. A position change requires window recreate
-    // (handled via reconcile_monitors), so it doesn't hot-reload here.
+    // anchored to this edge. A position change is restart-required (it
+    // is in RESTART_REQUIRED_FIELDS), so freezing it here is correct:
+    // a restart rebuilds this context from the new config.
     let position = config.position;
 
     // Shared hide timer state
