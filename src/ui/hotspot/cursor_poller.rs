@@ -40,9 +40,11 @@ pub(super) fn start_cursor_poller(
             }
         }));
     let monitor_refresh_counter = Rc::new(RefCell::new(0u32));
-    // When the cursor first arrived at the reveal edge — drives the
-    // `hotspot_delay` dwell requirement before showing the dock.
-    let edge_since: Rc<RefCell<Option<std::time::Instant>>> = Rc::new(RefCell::new(None));
+    // When the cursor first arrived at the reveal edge, and on which
+    // monitor — drives the `hotspot_delay` dwell requirement before
+    // showing the dock. Per-monitor so sliding from one monitor's edge
+    // straight onto another's doesn't inherit the first one's dwell.
+    let edge_since: Rc<RefCell<Option<(String, std::time::Instant)>>> = Rc::new(RefCell::new(None));
     let last_outputs: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(
         docks
             .borrow()
@@ -150,17 +152,28 @@ struct PollContext<'a> {
     /// `hotspot_delay` from live config: how long the cursor must dwell
     /// at the reveal edge before the dock shows.
     hotspot_delay_ms: u64,
-    /// When the cursor first arrived at the reveal edge (None = away).
-    edge_since: &'a Rc<RefCell<Option<std::time::Instant>>>,
+    /// Which monitor's reveal edge the cursor arrived at, and when
+    /// (None = away from every edge).
+    edge_since: &'a Rc<RefCell<Option<(String, std::time::Instant)>>>,
 }
 
-/// True once the cursor has dwelt at the reveal edge for `hotspot_delay`.
-/// One poll interval is credited so delays at or below the tick length —
-/// including the Go-parity default of 20 ms — reveal on the first tick,
-/// preserving the pre-dwell behavior for small values.
-fn edge_dwell_satisfied(ctx: &PollContext<'_>) -> bool {
+/// True once the cursor has dwelt at the named monitor's reveal edge
+/// for `hotspot_delay`. Arriving at a DIFFERENT monitor's edge restarts
+/// the clock — a single shared timestamp let a dwell completed on one
+/// monitor carry over to another. One poll interval is credited so
+/// delays at or below the tick length — including the Go-parity default
+/// of 20 ms — reveal on the first tick, preserving the pre-dwell
+/// behavior for small values.
+fn edge_dwell_satisfied(ctx: &PollContext<'_>, monitor_name: &str) -> bool {
     let mut since = ctx.edge_since.borrow_mut();
-    let arrived = since.get_or_insert_with(std::time::Instant::now);
+    let arrived = match since.as_ref() {
+        Some((name, t)) if name == monitor_name => *t,
+        _ => {
+            let now = std::time::Instant::now();
+            *since = Some((monitor_name.to_string(), now));
+            now
+        }
+    };
     arrived.elapsed().as_millis() as u64 + CURSOR_POLL_INTERVAL_MS >= ctx.hotspot_delay_ms
 }
 
@@ -170,12 +183,12 @@ fn handle_hidden_dock(ctx: &PollContext<'_>) {
     if !is_cursor_at_edge(ctx.cursor, ctx.monitors, ctx.position) {
         return;
     }
-    if !edge_dwell_satisfied(ctx) {
-        return;
-    }
     let Some(mon_name) = find_cursor_monitor_name(ctx.cursor, ctx.monitors) else {
         return;
     };
+    if !edge_dwell_satisfied(ctx, &mon_name) {
+        return;
+    }
     if ctx.suppress_on_fullscreen && fresh_fullscreen_check(ctx, &mon_name) {
         return;
     }
@@ -257,8 +270,8 @@ fn handle_visible_dock(ctx: &PollContext<'_>) {
     if at_edge
         && !in_dock_area
         && !keep_visible
-        && edge_dwell_satisfied(ctx)
         && let Some(mon_name) = find_cursor_monitor_name(ctx.cursor, ctx.monitors)
+        && edge_dwell_satisfied(ctx, &mon_name)
     {
         if ctx.suppress_on_fullscreen && fresh_fullscreen_check(ctx, &mon_name) {
             for dock in ctx.docks.borrow().iter() {

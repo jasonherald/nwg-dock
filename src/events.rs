@@ -239,15 +239,20 @@ pub(crate) fn start_event_listener(
     let (ws_sender, ws_receiver) = mpsc::channel::<()>();
 
     // Create the event stream on the main thread, then move it to the background.
-    let stream = match compositor.event_stream() {
-        Ok(s) => s,
+    match compositor.event_stream() {
+        Ok(stream) => spawn_event_thread(stream, sender, ws_sender),
         Err(e) => {
-            log::error!("Failed to connect to compositor event stream: {e}");
-            return;
+            // Still install the poller: with the senders dropped here,
+            // both channels read as Disconnected and the poller's
+            // reconnect path keeps retrying with backoff. Returning
+            // without a poller (the previous shape) turned a transient
+            // startup failure — compositor mid-reload — into a
+            // permanently event-deaf dock.
+            log::error!("Failed to connect to compositor event stream (will retry): {e}");
+            drop(sender);
+            drop(ws_sender);
         }
-    };
-
-    spawn_event_thread(stream, sender, ws_sender);
+    }
     install_event_poller(
         receiver,
         ws_receiver,

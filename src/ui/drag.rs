@@ -136,10 +136,13 @@ pub(crate) fn setup_drag_gesture(
     let pinned_path = pinned_file.to_path_buf();
     let rebuild = Rc::clone(rebuild);
     gesture.connect_drag_end(move |_gesture, _offset_x, _offset_y| {
+        // Read BEFORE cleanup: abort_drag_session's end_drag() clears
+        // drag_outside_dock, so reading it afterwards always yields
+        // false and unpin-by-drag-off never fires.
+        let outside = state_end.borrow().is_drag_outside_dock();
         let Some(s) = abort_drag_session(&state_end, &session_end) else {
             return;
         };
-        let outside = state_end.borrow().is_drag_outside_dock();
         finalize_drag(&state_end, &s, outside, &pinned_path, &rebuild);
     });
 

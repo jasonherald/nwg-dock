@@ -220,9 +220,20 @@ fn create_hotspot_window(ctx: &HotspotContext, dock: &MonitorDock) -> gtk4::Appl
         let name_show = name_enter.clone();
         let left_at_show = Rc::clone(&left_at_enter);
         let pending_done = Rc::clone(&pending_enter);
+        let state_show = Rc::clone(&state_enter);
+        let compositor_show = Rc::clone(&compositor_enter);
         let id =
             glib::timeout_add_local_once(std::time::Duration::from_millis(delay_ms), move || {
                 *pending_done.borrow_mut() = None;
+                // Re-check at fire time: a fullscreen window can appear
+                // during the dwell window, and showing over it defeats
+                // the suppression checked at enter time.
+                let cfg = state_show.borrow().config.clone();
+                if !cfg.no_fullscreen_suppress
+                    && compositor_fullscreen_check(&compositor_show, &name_show)
+                {
+                    return;
+                }
                 show_on_monitor_only_by_name(&docks_show, &name_show);
                 *left_at_show.borrow_mut() = None;
             });

@@ -97,13 +97,16 @@ fn main() {
         log::LevelFilter::Info
     });
 
+    // Normalize BEFORE the print branch so --print-config reports the
+    // same effective values the runtime would use (e.g. `-d -r` shows
+    // autohide=false, a missing launcher command shows nolauncher=true).
+    normalize_config(&mut config);
+
     // --print-config: dump and exit before any GTK / compositor side effects.
     if config.print_config {
         print!("{}", config_file::print_effective_config(&config));
         std::process::exit(0);
     }
-
-    normalize_config(&mut config);
     let compositor: Rc<dyn nwg_common::compositor::Compositor> =
         Rc::from(nwg_common::compositor::init_or_null(config.wm));
     let _lock = acquire_singleton_lock("mac-dock", config.multi, config.is_resident_mode());
@@ -413,6 +416,10 @@ fn acquire_singleton_lock(
     }
 }
 
+/// Unix permission mask for "executable by anyone" (owner, group, or
+/// other execute bit).
+const EXEC_PERMISSION_MASK: u32 = 0o111;
+
 /// Checks if a command exists on PATH — file AND executable bit, matching
 /// real shell lookup (a plain `is_file` check kept the launcher visible
 /// when a non-executable file shadowed the name).
@@ -423,7 +430,7 @@ fn command_exists(cmd: &str) -> bool {
             let full = std::path::Path::new(dir).join(cmd);
             if let Ok(meta) = std::fs::metadata(&full)
                 && meta.is_file()
-                && meta.permissions().mode() & 0o111 != 0
+                && meta.permissions().mode() & EXEC_PERMISSION_MASK != 0
             {
                 return true;
             }

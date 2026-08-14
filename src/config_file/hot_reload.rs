@@ -396,6 +396,8 @@ pub(super) fn preserve_restart_fields(
             "hotspot-layer" => target.hotspot_layer = source.hotspot_layer,
             "layer" => target.layer = source.layer,
             "exclusive" => target.exclusive = source.exclusive,
+            "position" => target.position = source.position,
+            "full" => target.full = source.full,
             // RESTART_REQUIRED_FIELDS is the only source of values for
             // `fields`, so any other label is a programming error.
             other => {
@@ -437,7 +439,7 @@ mod tests {
         // anchors are set once at window creation and nothing re-anchors on
         // reload — the poller switched edges while the windows stayed put.
         let a = cfg(&["test"]);
-        let b = cfg(&["test", "-p", "left", "-f"]);
+        let mut b = cfg(&["test", "-p", "left", "-f"]);
         match diff_config(&a, &b) {
             DiffResult::RestartRequired { restart_fields, .. } => {
                 assert!(
@@ -448,6 +450,16 @@ mod tests {
             }
             other => panic!("expected RestartRequired, got {other:?}"),
         }
+
+        // Classification alone is not enough: the live config must keep
+        // the OLD values until restart, or the cursor poller (which
+        // reads position live) switches edges while the windows stay
+        // anchored — the exact split-brain being prevented. This half
+        // was originally missing (preserve_restart_fields had no arms
+        // for position/full and warned "programming error").
+        preserve_restart_fields(&a, &mut b, &["position", "full"]);
+        assert_eq!(b.position, a.position, "position must stay pinned");
+        assert_eq!(b.full, a.full, "full must stay pinned");
     }
 
     #[test]
