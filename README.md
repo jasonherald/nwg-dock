@@ -204,6 +204,34 @@ Without uwsm (Slackware, distros where `uwsm` isn't packaged, or by preference) 
 exec-once = nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c "nwg-drawer --opacity 88 --pb-auto"
 ```
 
+### Hyprland Lua config (Omarchy 4.0 "Quattro" and other Lua setups)
+
+Hyprland 0.55+ Lua configurations don't read `autostart.conf`. On Omarchy
+4.0 the equivalent lives in `~/.config/hypr/autostart.lua`:
+
+```lua
+-- ~/.config/hypr/autostart.lua
+o.launch_on_start([[nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c "nwg-drawer --opacity 88 --pb-auto"]])
+```
+
+On plain Lua setups without Omarchy's helpers, register the command on the
+start hook instead. This goes in a Lua file loaded by
+`~/.config/hypr/hyprland.lua` (directly, or via a `require(...)` from it):
+
+```lua
+hl.on("hyprland.start", function()
+  hl.exec_cmd([[nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c "nwg-drawer --pb-auto"]])
+end)
+```
+
+**Migrating to Omarchy 4.0:** the Quattro migration generates the new
+`.lua` config files but does **not** carry custom `exec-once` lines
+across from `autostart.conf` — after the upgrade the dock (and anything
+else you autostarted) silently stops launching until you re-add it in
+`autostart.lua` as above. The dock itself is fully functional on Lua
+sessions as of v0.6.0+ (window actions use the Lua dispatcher syntax
+automatically via nwg-common 0.7).
+
 The dock has no runtime dependency on uwsm or systemd; the wrapper just buys you per-process cgroup tracking and clean teardown on logout if you want it.
 
 ### Known issue: GTK4 crash on DPMS cycles (Hyprland ≥ 0.56)

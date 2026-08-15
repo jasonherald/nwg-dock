@@ -63,6 +63,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `make setup-hyprland` mentions the `GDK_WAYLAND_DISABLE` workaround
   documented in the README's Known Issue section.
+- README and `make setup-hyprland` document autostart for Hyprland Lua
+  configurations (Omarchy 4.0 "Quattro"): `autostart.conf` is not read
+  there, and the Quattro migration does not carry custom `exec-once`
+  lines across — the dock must be re-added in `autostart.lua`.
 
 ## [0.6.0] — 2026-07-21
 
