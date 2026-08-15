@@ -37,7 +37,7 @@ log = "0.4"
 env_logger = "0.11"
 
 # Unix signals and process management
-nix = { version = "0.31", features = ["signal", "process", "fs"] }
+nix = { version = "0.31", features = ["signal", "process", "fs", "user"] }
 
 # File watching (pin-file inotify, CSS hot-reload, config-file hot-reload)
 notify = "8"

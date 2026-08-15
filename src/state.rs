@@ -298,11 +298,14 @@ impl DockState {
     /// reset the timer).
     ///
     /// The `SourceId` in `launch_timeouts` was consumed by the GLib
-    /// runtime on fire — calling `.remove()` on it would be a use-
-    /// after-free at the GLib C level, so we discard it implicitly
-    /// here. Callers in non-fired paths (window-match cancel, double-
-    /// click reset) MUST use `cancel_launch` instead, which preserves
-    /// the SourceId for explicit `.remove()`. The single-method shape
+    /// runtime on fire — calling `.remove()` on it would target an id
+    /// that no longer exists, producing a GLib-CRITICAL "Source ID was
+    /// not found" warning (source removal is id-lookup, not a pointer
+    /// dereference — noise, not memory unsafety), so we discard it
+    /// implicitly here. Callers in non-fired paths (window-match
+    /// cancel, double-click reset) MUST use `cancel_launch` instead,
+    /// which preserves the SourceId for explicit `.remove()`. The
+    /// single-method shape
     /// keeps the `launching ↔ launch_timeouts` invariant by
     /// construction — a caller can't accidentally clear one map and
     /// forget the other.
@@ -359,14 +362,16 @@ impl DockState {
         // The previous `.ok()` shape collapsed both into None, so a
         // genuine IPC failure (socket dropped, malformed payload) was
         // indistinguishable from a workspace with no focused client.
-        // Log at debug so the trail is in journalctl when a user
-        // reports stale highlight, but don't propagate — the dock
-        // should keep running with its previous active-client snapshot
-        // rather than tearing down the rebuild path.
+        // Log at warn — this is a genuine IPC failure and the default
+        // log level filters debug out, which would leave no trail in
+        // journalctl for exactly the stale-highlight report this exists
+        // to explain. Don't propagate — the dock should keep running
+        // with its previous active-client snapshot rather than tearing
+        // down the rebuild path.
         self.active_client = match self.compositor.get_active_window() {
             Ok(client) => Some(client),
             Err(e) => {
-                log::debug!("get_active_window failed: {e}");
+                log::warn!("get_active_window failed: {e}");
                 None
             }
         };

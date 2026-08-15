@@ -13,6 +13,13 @@ pub(super) const RESTART_REQUIRED_FIELDS: &[&str] = &[
     "hotspot-layer",
     "layer",
     "exclusive",
+    // Layer-shell anchors are set once at window creation and nothing in
+    // the reconcile path observes these (needs_reconcile compares monitor
+    // names and surface validity only), so "hot-reloading" them produced
+    // a split-brain dock: the cursor poller switched to the new edge
+    // while the windows stayed anchored to the old one.
+    "position",
+    "full",
 ];
 
 /// Outcome of comparing the live `DockConfig` against a freshly-merged
@@ -33,6 +40,37 @@ pub(crate) enum DiffResult {
         restart_fields: Vec<&'static str>,
         applied: Vec<&'static str>,
     },
+}
+
+impl DiffResult {
+    /// Removes a field from the `applied` list — used when the apply
+    /// step discovers post-diff that a change did not actually land
+    /// (currently: a failed css-file rebind). An `Applicable` result
+    /// whose last applied field is removed degrades to `NoChange` so
+    /// the user isn't told "config reloaded" about a no-op.
+    pub(crate) fn without_applied_field(self, field: &str) -> Self {
+        match self {
+            DiffResult::NoChange => DiffResult::NoChange,
+            DiffResult::Applicable { mut applied } => {
+                applied.retain(|f| *f != field);
+                if applied.is_empty() {
+                    DiffResult::NoChange
+                } else {
+                    DiffResult::Applicable { applied }
+                }
+            }
+            DiffResult::RestartRequired {
+                restart_fields,
+                mut applied,
+            } => {
+                applied.retain(|f| *f != field);
+                DiffResult::RestartRequired {
+                    restart_fields,
+                    applied,
+                }
+            }
+        }
+    }
 }
 
 /// Computes which fields differ between `old` and `new`, classifying
@@ -88,9 +126,17 @@ fn diff_config(old: &DockConfig, new: &DockConfig) -> DiffResult {
     cmp!(ico, "ico");
 
     // [filters]
-    cmp!(ignore_classes, "ignore-classes");
+    // ignore-classes diffs on the EFFECTIVE list, not the joined string:
+    // the array and string forms can produce the same joined string with
+    // different semantics (["a b"] vs ["a", "b"]), and only the list is
+    // what consumers act on.
+    if old.ignored_classes() != new.ignored_classes() {
+        all_changed.push("ignore-classes");
+        hot_reloadable.push("ignore-classes");
+    }
     cmp!(ignore_workspaces, "ignore-workspaces");
     cmp!(num_ws, "num-ws");
+    cmp!(ws, "ws");
     cmp!(no_fullscreen_suppress, "no-fullscreen-suppress");
 
     if all_changed.is_empty() {
@@ -183,12 +229,23 @@ pub(crate) fn apply_config_change(
 
     state.borrow_mut().config = Rc::new(next_config);
 
+    // The diff computed `applied` BEFORE apply ran — if the css-file
+    // rebind failed, the field did not actually apply, and reporting
+    // "Applied: css-file" right after the "CSS reload failed"
+    // notification is a contradiction. Correct the list post-hoc.
+    let result = if css_file_applied {
+        result
+    } else {
+        result.without_applied_field("css-file")
+    };
+
     // Single rebuild call covers icon-size, alignment, launcher-cmd,
     // launcher-pos, nolauncher, ico, ignore-classes, ignore-workspaces,
-    // num-ws, no-fullscreen-suppress, launch-animation. position, full,
-    // and output changes that require window recreate are picked up by
-    // reconcile_monitors via the GDK monitor watcher (or the liveness
-    // tick) the next time it fires.
+    // num-ws, no-fullscreen-suppress, launch-animation. `output` changes
+    // are picked up by the liveness tick (resolve_monitors returns a
+    // different set, which needs_reconcile observes). `position` and
+    // `full` are restart-required: window anchors are set once at
+    // creation and nothing in the reconcile path observes them.
     rebuild();
 
     result
@@ -339,6 +396,8 @@ pub(super) fn preserve_restart_fields(
             "hotspot-layer" => target.hotspot_layer = source.hotspot_layer,
             "layer" => target.layer = source.layer,
             "exclusive" => target.exclusive = source.exclusive,
+            "position" => target.position = source.position,
+            "full" => target.full = source.full,
             // RESTART_REQUIRED_FIELDS is the only source of values for
             // `fields`, so any other label is a programming error.
             other => {
@@ -372,6 +431,35 @@ mod tests {
         let a = cfg(&["test"]);
         let b = cfg(&["test"]);
         assert!(matches!(diff_config(&a, &b), DiffResult::NoChange));
+    }
+
+    #[test]
+    fn diff_position_and_full_are_restart_required() {
+        // Regression: these were classified hot-reloadable, but layer-shell
+        // anchors are set once at window creation and nothing re-anchors on
+        // reload — the poller switched edges while the windows stayed put.
+        let a = cfg(&["test"]);
+        let mut b = cfg(&["test", "-p", "left", "-f"]);
+        match diff_config(&a, &b) {
+            DiffResult::RestartRequired { restart_fields, .. } => {
+                assert!(
+                    restart_fields.contains(&"position"),
+                    "got: {restart_fields:?}"
+                );
+                assert!(restart_fields.contains(&"full"), "got: {restart_fields:?}");
+            }
+            other => panic!("expected RestartRequired, got {other:?}"),
+        }
+
+        // Classification alone is not enough: the live config must keep
+        // the OLD values until restart, or the cursor poller (which
+        // reads position live) switches edges while the windows stay
+        // anchored — the exact split-brain being prevented. This half
+        // was originally missing (preserve_restart_fields had no arms
+        // for position/full and warned "programming error").
+        preserve_restart_fields(&a, &mut b, &["position", "full"]);
+        assert_eq!(b.position, a.position, "position must stay pinned");
+        assert_eq!(b.full, a.full, "full must stay pinned");
     }
 
     #[test]

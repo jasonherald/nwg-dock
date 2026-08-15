@@ -71,6 +71,7 @@ pub(crate) struct FiltersSection {
     pub(crate) ignore_classes: Option<StringOrList>,
     pub(crate) ignore_workspaces: Option<StringOrList>,
     pub(crate) num_ws: Option<i32>,
+    pub(crate) ws: Option<bool>,
     pub(crate) no_fullscreen_suppress: Option<bool>,
 }
 

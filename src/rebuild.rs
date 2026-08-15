@@ -4,8 +4,11 @@
 //! monitor's dock content. The closure needs to pass *itself* to each button
 //! (so buttons can trigger a rebuild on pin/unpin), which would create an
 //! `Rc` cycle. The cycle is broken with a `Weak` reference stored in a
-//! `Rc<RefCell<Weak<dyn Fn()>>>` holder; buttons upgrade the `Weak` at
-//! call time.
+//! `Rc<RefCell<Weak<dyn Fn()>>>` holder; the closure upgrades the `Weak`
+//! once per rebuild iteration and hands buttons strong clones for that
+//! generation. Those strong clones do form a temporary cycle, but every
+//! rebuild destroys the previous generation's widgets (and main.rs holds
+//! the closure for the process lifetime anyway), so nothing leaks.
 //!
 //! A `running` / `pending` `Cell<bool>` pair guards against reentrancy:
 //! glycin's icon loading uses D-Bus and can pump the GTK main loop, which
@@ -33,13 +36,21 @@ use std::rc::{Rc, Weak};
 /// which previously left ghost widgets in `alignment_box`. The guard
 /// turns recursive calls into a "pending" flag and re-runs once the
 /// current rebuild finishes.
+/// Returns the rebuild closure plus the shared `running` flag.
+///
+/// The flag is exported so `reconcile_monitors` can refuse to mutate
+/// `per_monitor` while a rebuild is iterating it: the rebuild holds a
+/// shared borrow across `dock_box::build`, which pumps the main loop
+/// (glycin), and an idle-dispatched reconcile taking `borrow_mut()`
+/// during that pump is a `BorrowMutError` panic. Skipped reconciles
+/// are re-attempted by the liveness tick within ~2s.
 pub(crate) fn create_rebuild_fn(
     per_monitor: &Rc<RefCell<Vec<MonitorDock>>>,
     state: &Rc<RefCell<DockState>>,
     data_home: &Rc<std::path::PathBuf>,
     pinned_file: &Rc<std::path::PathBuf>,
     compositor: &Rc<dyn Compositor>,
-) -> Rc<dyn Fn()> {
+) -> (Rc<dyn Fn()>, Rc<Cell<bool>>) {
     let per_monitor = Rc::clone(per_monitor);
     let state = Rc::clone(state);
     let data_home = Rc::clone(data_home);
@@ -82,12 +93,22 @@ pub(crate) fn create_rebuild_fn(
                 // The rebuild below destroys every dock widget, including any
                 // popover that is still open. A popover finalized together
                 // with its parent button never emits `closed`, so the
-                // show/closed pair in `menus::attach_popover_state_tracking`
+                // show/closed pair in `menus::create_tracked_popover`
                 // leaks `popover_open = true` — which permanently suppresses
                 // autohide (dock stuck open). Reset the flag as part of the
                 // teardown; a popover opened after this rebuild sets it true
-                // again through the normal `show` signal.
-                state.borrow_mut().popover_open = false;
+                // again through the normal `show` signal. Drag state gets the
+                // same treatment for the same reason: the rebuild destroys
+                // any button whose gesture is mid-press, and a gesture that
+                // dies without emitting drag-end (drag.rs also handles the
+                // cancel signal, but destruction can skip both) would leak
+                // `drag_pending = true`, wedging autohide AND deferring all
+                // event-driven rebuilds forever.
+                {
+                    let mut s = state.borrow_mut();
+                    s.popover_open = false;
+                    s.end_drag();
+                }
 
                 // Read live config from state. Brief borrow; dropped before
                 // dock_box::build is called (which itself may borrow state).
@@ -120,7 +141,7 @@ pub(crate) fn create_rebuild_fn(
 
     // Store a Weak reference — no cycle
     *holder.borrow_mut() = Rc::downgrade(&rebuild_fn) as Weak<dyn Fn()>;
-    rebuild_fn
+    (rebuild_fn, running)
 }
 
 /// Rebuilds the content of a single monitor's dock window.
@@ -157,6 +178,13 @@ fn rebuild_one_dock(dock: &MonitorDock, ctx: &DockContext) {
 fn schedule_surface_reset(win: &gtk4::ApplicationWindow) {
     let win = win.clone();
     gtk4::glib::idle_add_local_once(move || {
+        // Re-check at dispatch time: autohide or a SIGRTMIN Hide can
+        // legitimately hide the window between the rebuild's visibility
+        // check and this idle — an unconditional show would override
+        // that hide until the next timeout.
+        if !win.is_visible() {
+            return;
+        }
         win.set_visible(false);
         win.set_visible(true);
     });

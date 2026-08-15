@@ -98,6 +98,14 @@ pub(crate) struct DockConfig {
     #[arg(short = 'g', long, default_value = "")]
     pub(crate) ignore_classes: String,
 
+    /// File-only companion to `ignore_classes`: the TOML array form,
+    /// preserved as a real list so class names containing spaces survive.
+    /// The flattened string form is re-split on whitespace, which is
+    /// exactly what the array form exists to avoid. Not a CLI arg — the
+    /// CLI keeps the Go-compatible space-separated string.
+    #[arg(skip)]
+    pub(crate) ignore_classes_list: Option<Vec<String>>,
+
     /// Hotspot delay in ms (smaller = faster trigger to show)
     #[arg(long, alias = "hd", default_value_t = 20)]
     pub(crate) hotspot_delay: i64,
@@ -224,28 +232,34 @@ impl DockConfig {
         self.autohide || self.resident
     }
 
-    /// Returns ignored workspace names/ids as a list.
+    /// Returns ignored workspace names/ids as a list. Empty segments
+    /// (trailing comma, doubled comma) are dropped — an empty string in
+    /// the list would match windows/workspaces with an empty name.
     pub(crate) fn ignored_workspaces(&self) -> Vec<String> {
-        if self.ignore_workspaces.is_empty() {
-            Vec::new()
-        } else {
-            self.ignore_workspaces
-                .split(',')
-                .map(|s| s.trim().to_string())
-                .collect()
-        }
+        self.ignore_workspaces
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
     }
 
-    /// Returns ignored classes as a list.
+    /// Returns ignored classes as a list. The TOML-array form (which
+    /// supports class names containing spaces) takes precedence; the
+    /// string form splits on whitespace with empty segments dropped —
+    /// a previous `split(' ')` produced `""` entries on doubled or
+    /// trailing spaces, silently hiding windows with an empty class.
     pub(crate) fn ignored_classes(&self) -> Vec<String> {
-        if self.ignore_classes.is_empty() {
-            Vec::new()
-        } else {
-            self.ignore_classes
-                .split(' ')
+        if let Some(list) = &self.ignore_classes_list {
+            return list
+                .iter()
                 .map(|s| s.trim().to_string())
-                .collect()
+                .filter(|s| !s.is_empty())
+                .collect();
         }
+        self.ignore_classes
+            .split_whitespace()
+            .map(str::to_string)
+            .collect()
     }
 }
 

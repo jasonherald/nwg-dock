@@ -14,6 +14,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.6.1] — Unreleased
 
+### Fixed
+
+- The dock no longer rebuilds on every file any application writes to
+  `~/.cache` — the pin-file watcher now reacts only to the pin file
+  itself. Symptoms fixed: constant background rebuild churn, and open
+  menus or in-progress drags being destroyed mid-interaction.
+- Eliminated a crash window where a monitor event (DPMS wake, hotplug)
+  arriving during a rebuild's icon loading could panic the dock.
+- A drag whose gesture is cancelled (grab break, rebuild mid-press) no
+  longer leaks state that wedged auto-hide open and stalled window-event
+  updates until the next click — and can no longer save a stale pin
+  order to the shared pin file.
+- Editing `position` or `full` in the config file now reports "Restart
+  required" instead of half-applying: the dock previously kept its old
+  anchor while auto-hide switched to the new edge.
+- `-m`/`--multi` works: the second instance no longer hands itself to
+  the first via D-Bus application uniqueness.
+- `hotspot-delay` and `hotspot-layer` are functional (previously parsed
+  but ignored). Delay is the dwell time the cursor must spend at the
+  reveal edge; layer applies to the Sway hotspot strips. The Sway path
+  also gains fullscreen suppression (`--no-fullscreen-suppress` was a
+  no-op there) and no longer sticks visible after a menu closes with
+  the cursor away from the dock.
+- `ws` can be set from the config file and appears in `--print-config`
+  — it was the one option missing from the file surface.
+- `ignore-classes` TOML arrays now match class names containing spaces
+  (the array form's whole purpose); string form no longer produces
+  empty entries that hid windows with an empty class.
+- A config save no longer resurrects a launcher button whose command is
+  missing, and `-d -r` no longer produces a spurious "Restart required"
+  notification on every save.
+- A failed CSS reload is no longer also reported as "Applied".
+- The compositor event stream reconnects after transient IPC errors
+  instead of silently going deaf for the rest of the session.
+- Drag-to-reorder lands in the right slot when some pinned apps are
+  hidden by `ignore-classes`, and the unpin-by-drag-off decision always
+  matches the on-screen removal indicator.
+- An app crashing and respawning between updates refreshes its task
+  button (clicks no longer target the dead window).
+- A user's local `.desktop` entry takes precedence over system/flatpak
+  entries for window grouping, per XDG order.
+- Symlinked config files (dotfile managers) hot-reload correctly.
+- Assorted diagnostics: launcher-icon load failures, out-of-range file
+  opacity, and active-window IPC failures are logged instead of silent.
+
+### Changed
+
+- `make setup-hyprland` mentions the `GDK_WAYLAND_DISABLE` workaround
+  documented in the README's Known Issue section.
+
 ## [0.6.0] — 2026-07-21
 
 ### Changed

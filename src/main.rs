@@ -97,18 +97,16 @@ fn main() {
         log::LevelFilter::Info
     });
 
+    // Normalize BEFORE the print branch so --print-config reports the
+    // same effective values the runtime would use (e.g. `-d -r` shows
+    // autohide=false, a missing launcher command shows nolauncher=true).
+    normalize_config(&mut config);
+
     // --print-config: dump and exit before any GTK / compositor side effects.
     if config.print_config {
         print!("{}", config_file::print_effective_config(&config));
         std::process::exit(0);
     }
-
-    if config.autohide && config.resident {
-        log::warn!("autohide and resident are mutually exclusive, ignoring -d!");
-        config.autohide = false;
-    }
-
-    auto_detect_launcher(&mut config);
     let compositor: Rc<dyn nwg_common::compositor::Compositor> =
         Rc::from(nwg_common::compositor::init_or_null(config.wm));
     let _lock = acquire_singleton_lock("mac-dock", config.multi, config.is_resident_mode());
@@ -131,13 +129,36 @@ fn main() {
         }
     }
 
-    let cache_dir = paths::cache_dir().expect("Couldn't determine cache directory");
+    // A missing $HOME/$XDG_CACHE_HOME (misconfigured service unit)
+    // shouldn't be a raw panic — but the fallback must never be /tmp:
+    // the pin file and its rename-temp sibling would sit at predictable
+    // names in a world-writable directory, where a pre-planted symlink
+    // turns our reads and writes into reads/writes of attacker-chosen
+    // paths. $XDG_RUNTIME_DIR is per-user and mode 0700; if that's
+    // unset too, the environment is too broken to run safely.
+    let cache_dir = paths::cache_dir()
+        .or_else(private_runtime_dir)
+        .unwrap_or_else(|| {
+            log::error!(
+                "No usable private cache directory (XDG_CACHE_HOME, HOME, \
+                 XDG_RUNTIME_DIR all unusable); refusing a world-writable \
+                 /tmp fallback for the pin file"
+            );
+            std::process::exit(EXIT_STARTUP_FAILURE);
+        });
     let pinned_file = cache_dir.join("mac-dock-pinned");
     let app_dirs = get_app_dirs();
     let sig_rx = Rc::new(signals::setup_signal_handlers(config.is_resident_mode()));
 
+    // NON_UNIQUE: instance management belongs to our singleton lock
+    // (acquire_singleton_lock above — pidfile with stale detection and a
+    // -m/--multi escape hatch). GApplication's D-Bus uniqueness would
+    // fight it: a second `-m` process would remote-activate the primary
+    // (running activate_dock a second time there — duplicate listeners
+    // and dock windows) and exit, instead of running its own dock.
     let app = gtk4::Application::builder()
         .application_id("com.mac-dock.hyprland")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
     let bootstrap = Rc::new(DockBootstrap {
@@ -219,7 +240,7 @@ fn activate_dock(app: &gtk4::Application, params: &DockBootstrap) {
     let docks = dock_windows::create_dock_windows(app, &monitors, &params.config);
     let per_monitor = Rc::new(RefCell::new(docks));
 
-    let rebuild = rebuild::create_rebuild_fn(
+    let (rebuild, rebuild_running) = rebuild::create_rebuild_fn(
         &per_monitor,
         &state,
         &params.data_home,
@@ -243,12 +264,8 @@ fn activate_dock(app: &gtk4::Application, params: &DockBootstrap) {
     } else {
         None
     };
-    events::start_event_listener(
-        Rc::clone(&state),
-        Rc::clone(&rebuild),
-        params.compositor.as_ref(),
-    );
-    listeners::setup_pin_watcher(&params.pinned_file, &rebuild);
+    events::start_event_listener(Rc::clone(&state), Rc::clone(&rebuild), &params.compositor);
+    listeners::setup_pin_watcher(&params.pinned_file, &rebuild, &state);
     listeners::setup_signal_poller(app, &per_monitor, &params.sig_rx);
 
     let reconcile_ctx = Rc::new(listeners::ReconcileContext {
@@ -256,6 +273,7 @@ fn activate_dock(app: &gtk4::Application, params: &DockBootstrap) {
         per_monitor: Rc::clone(&per_monitor),
         state: Rc::clone(&state),
         rebuild_fn: Rc::clone(&rebuild),
+        rebuild_running,
         hotspot_ctx,
     });
     listeners::setup_monitor_watcher(Rc::clone(&reconcile_ctx));
@@ -319,7 +337,10 @@ fn on_config_save(
             return;
         }
     };
-    let new = config_file::merge(&matches, cli_snapshot, raw);
+    let mut new = config_file::merge(&matches, cli_snapshot, raw);
+    // Same normalizations as cold start — the diff below compares
+    // against the live config, which has them applied.
+    normalize_config(&mut new);
 
     let result = config_file::apply_config_change(new, state, per_monitor, rebuild);
 
@@ -351,6 +372,20 @@ fn on_config_save(
     }
 }
 
+/// Post-merge normalizations applied to every effective config — cold
+/// start AND hot reload must both run this. Reload diffs compare the
+/// candidate against the live (already-normalized) config, so skipping
+/// it on reload manufactures phantom diffs: `-d -r` users got a spurious
+/// "Restart required for: autohide" on every save, and a launcher hidden
+/// because its command is missing came back on any unrelated edit.
+fn normalize_config(config: &mut DockConfig) {
+    if config.autohide && config.resident {
+        log::warn!("autohide and resident are mutually exclusive, ignoring -d!");
+        config.autohide = false;
+    }
+    auto_detect_launcher(config);
+}
+
 /// Auto-detect launcher: hide button if command not found on PATH.
 fn auto_detect_launcher(config: &mut DockConfig) {
     if config.nolauncher || config.launcher_cmd.is_empty() {
@@ -377,7 +412,10 @@ fn acquire_singleton_lock(
         Err(existing_pid) => {
             if let Some(pid) = existing_pid {
                 if is_resident {
-                    log::info!("Running instance found (pid {pid}), terminating...");
+                    // We exit; the running instance is left alone. The old
+                    // wording ("terminating...") read as if the OTHER
+                    // process were being killed.
+                    log::info!("Dock already running (pid {pid}); this instance exits");
                 } else {
                     signals::send_signal_to_pid(pid, signals::sig_toggle());
                     log::info!("Sent toggle signal to running instance (pid {pid}), bye!");
@@ -388,12 +426,58 @@ fn acquire_singleton_lock(
     }
 }
 
-/// Checks if a command exists on PATH.
+/// Unix permission mask for "executable by anyone" (owner, group, or
+/// other execute bit).
+const EXEC_PERMISSION_MASK: u32 = 0o111;
+
+/// Process exit status for unrecoverable startup errors (conventional
+/// generic-failure code).
+const EXIT_STARTUP_FAILURE: i32 = 1;
+
+/// Owner-only directory permissions (`drwx------`) — what a private
+/// fallback directory must be to substitute for the XDG cache dir.
+const PRIVATE_DIR_MODE: u32 = 0o700;
+
+/// Mask selecting the user/group/other permission bits of `st_mode`
+/// (excluding file-type and setuid/setgid/sticky bits).
+const PERMISSION_BITS_MASK: u32 = 0o777;
+
+/// `$XDG_RUNTIME_DIR` as a validated private-directory fallback: the
+/// value must be set, absolute, and an existing directory owned by the
+/// current user with mode 0700. Anything else returns `None` — accepting
+/// an empty/relative/shared directory here would defeat the point of
+/// refusing the /tmp fallback (see the pin-file call site). Shared by
+/// the pin-file path below and the arrangement lock file in
+/// `ui::dock_menu`.
+pub(crate) fn private_runtime_dir() -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    let dir = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
+    if !dir.is_absolute() {
+        return None;
+    }
+    let meta = std::fs::metadata(&dir).ok()?;
+    if !meta.is_dir()
+        || meta.uid() != nix::unistd::geteuid().as_raw()
+        || meta.mode() & PERMISSION_BITS_MASK != PRIVATE_DIR_MODE
+    {
+        return None;
+    }
+    Some(dir)
+}
+
+/// Checks if a command exists on PATH — file AND executable bit, matching
+/// real shell lookup (a plain `is_file` check kept the launcher visible
+/// when a non-executable file shadowed the name).
 fn command_exists(cmd: &str) -> bool {
+    use std::os::unix::fs::PermissionsExt;
     if let Ok(path) = std::env::var("PATH") {
         for dir in path.split(':') {
             let full = std::path::Path::new(dir).join(cmd);
-            if full.is_file() {
+            if let Ok(meta) = std::fs::metadata(&full)
+                && meta.is_file()
+                && meta.permissions().mode() & EXEC_PERMISSION_MASK != 0
+            {
                 return true;
             }
         }
@@ -416,7 +500,12 @@ fn build_wm_class_map(app_dirs: &[PathBuf]) -> HashMap<String, String> {
                 .to_string();
             match nwg_common::desktop::entry::parse_desktop_file(&id, &path) {
                 Ok(entry) if !entry.startup_wm_class.is_empty() => {
-                    map.insert(entry.startup_wm_class.to_lowercase(), id);
+                    // First wins: get_app_dirs() returns the user data dir
+                    // before system/flatpak dirs, and XDG precedence says
+                    // the user's .desktop entry overrides later ones. A
+                    // plain insert would invert that (last writer wins).
+                    map.entry(entry.startup_wm_class.to_lowercase())
+                        .or_insert(id);
                 }
                 Ok(_) => {} // no StartupWMClass — skip
                 Err(e) => log::warn!("Failed to parse {}: {}", path.display(), e),

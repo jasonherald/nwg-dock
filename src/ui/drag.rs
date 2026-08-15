@@ -113,10 +113,12 @@ pub(crate) fn setup_drag_gesture(
             if distance < DRAG_CLAIM_THRESHOLD {
                 return;
             }
-            gesture.set_state(gtk4::EventSequenceState::Claimed);
-
+            // Claim only once a session exists — claiming first meant a
+            // drag whose begin-guards bailed (no session) could still
+            // swallow the button's click with nothing to show for it.
             let mut sess = session_update.borrow_mut();
             let Some(ref mut s) = *sess else { return };
+            gesture.set_state(gtk4::EventSequenceState::Claimed);
             state_update.borrow_mut().claim_drag(s.source_index);
             set_dock_cursor(&s.dock_box, "grabbing");
             handle_drag_motion(gesture, s, &state_update, offset_x, offset_y);
@@ -134,24 +136,55 @@ pub(crate) fn setup_drag_gesture(
     let pinned_path = pinned_file.to_path_buf();
     let rebuild = Rc::clone(rebuild);
     gesture.connect_drag_end(move |_gesture, _offset_x, _offset_y| {
-        let sess = session_end.borrow_mut().take();
-        let Some(s) = sess else { return };
-
+        // Read BEFORE cleanup: abort_drag_session's end_drag() clears
+        // drag_outside_dock, so reading it afterwards always yields
+        // false and unpin-by-drag-off never fires.
         let outside = state_end.borrow().is_drag_outside_dock();
-
-        // Clear drag state — end_drag resets all three coupled fields
-        state_end.borrow_mut().end_drag();
-
-        // Restore cursor and visuals
-        if let Some(root) = s.dock_box.root() {
-            root.upcast_ref::<gtk4::Widget>().set_cursor(None);
-        }
-        update_removal_indicator(&s.source_item, false, 0);
-
+        let Some(s) = abort_drag_session(&state_end, &session_end) else {
+            return;
+        };
         finalize_drag(&state_end, &s, outside, &pinned_path, &rebuild);
     });
 
+    // --- cancel: clean up without persisting anything ---
+    // GTK cancels a sequence without emitting drag-end when the grab
+    // breaks or the widget is destroyed mid-press (e.g. a rebuild fired
+    // by the pin watcher or monitor reconcile tears the button down).
+    // Without this handler, `drag_pending` set in drag-begin leaks true
+    // — wedging autohide and deferring event-driven rebuilds — and a
+    // later drag-end against a rebuilt layout could persist a reorder
+    // computed from stale indices. Cancel = abort: state and visuals
+    // reset, nothing written.
+    let state_cancel = Rc::clone(state);
+    let session_cancel = Rc::clone(&session);
+    gesture.connect_cancel(move |_gesture, _sequence| {
+        abort_drag_session(&state_cancel, &session_cancel);
+    });
+
     button.add_controller(gesture);
+}
+
+/// Shared teardown for drag-end and cancel: takes the session, clears the
+/// coupled drag flags, and restores cursor + removal indicator. Returns
+/// the taken session so drag-end can additionally finalize (persist);
+/// cancel discards it.
+fn abort_drag_session(
+    state: &Rc<RefCell<DockState>>,
+    session: &Rc<RefCell<Option<DragSession>>>,
+) -> Option<DragSession> {
+    let sess = session.borrow_mut().take();
+
+    // Clear drag state even when no session exists — drag-begin sets
+    // `drag_pending` before the session is created, so an early-guard
+    // bail can leave the flag set with `sess == None`.
+    state.borrow_mut().end_drag();
+
+    let s = sess?;
+    if let Some(root) = s.dock_box.root() {
+        root.upcast_ref::<gtk4::Widget>().set_cursor(None);
+    }
+    update_removal_indicator(&s.source_item, false, 0);
+    Some(s)
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +282,22 @@ fn reorder_pinned(
     pinned_path: &Path,
     rebuild: &Rc<dyn Fn()>,
 ) {
+    // `current_index` is a VISUAL position among the other rendered
+    // `.pinned-item` widgets — but entries hidden by ignore-classes (or
+    // deduplicated) make the data list longer than the visual row, so it
+    // cannot be used directly as a data insertion index (a reorder next
+    // to a hidden pin landed in the wrong slot or silently reverted).
+    // Translate through the shared visibility mapping first.
+    let (pinned_snapshot, ignored) = {
+        let st = state.borrow();
+        (st.pinned.clone(), st.config.ignored_classes())
+    };
+    let other_visible: Vec<usize> =
+        crate::ui::dock_box::visible_pin_indices(state, &pinned_snapshot, &ignored)
+            .into_iter()
+            .filter(|&i| i != session.source_index)
+            .collect();
+
     let mut st = state.borrow_mut();
     let pinned_len = st.pinned.len();
     if session.source_index >= pinned_len {
@@ -258,10 +307,20 @@ fn reorder_pinned(
     // Remove from original position
     let item = st.pinned.remove(session.source_index);
 
-    // current_index is where the item sits visually among the OTHER items
-    // (excluding itself). After remove, the array has pinned_len - 1 elements.
-    // current_index is already correct as an insertion point.
-    let insert_at = session.current_index.min(st.pinned.len());
+    // Visual insertion slot v means "before the item visually at v"
+    // (among the others); past-the-end means append. Data indices after
+    // the removal shift down by one for entries beyond source_index.
+    let insert_at = match other_visible.get(session.current_index) {
+        Some(&target_data_idx) => {
+            if target_data_idx > session.source_index {
+                target_data_idx - 1
+            } else {
+                target_data_idx
+            }
+        }
+        None => st.pinned.len(),
+    }
+    .min(st.pinned.len());
     st.pinned.insert(insert_at, item);
 
     if let Err(e) = pinning::save_pinned(&st.pinned, pinned_path) {

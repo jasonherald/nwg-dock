@@ -145,6 +145,7 @@ fn collect_unknown_keys(value: &toml::Value) -> Vec<String> {
                 "ignore-classes",
                 "ignore-workspaces",
                 "num-ws",
+                "ws",
                 "no-fullscreen-suppress",
             ],
             _ => {

@@ -54,6 +54,10 @@ pub(crate) const WORKSPACE_ROW_SPACING: i32 = 0;
 /// `ui/workspaces.rs::build_workspace_row` for the per-Position margin.
 pub(crate) const INDICATOR_DIVISOR: i32 = 8;
 
+/// Maximum characters of a window title shown in menu entries before
+/// truncation with an ellipsis (client menus, context menus).
+pub(crate) const MENU_TITLE_MAX_CHARS: usize = 25;
+
 /// Upper bound on the `--opacity 0..=100` CLI/config value. Used to clamp
 /// user input before computing `alpha = opacity / OPACITY_PERCENT_MAX`
 /// for the dock background's CSS `rgba(...)`. Single source of truth

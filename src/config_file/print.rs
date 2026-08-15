@@ -46,9 +46,16 @@ pub(crate) fn print_effective_config(cfg: &DockConfig) -> String {
             ico: Some(cfg.ico.clone()),
         },
         filters: FiltersSection {
-            ignore_classes: Some(StringOrList::String(cfg.ignore_classes.clone())),
+            // Array form round-trips as an array — flattening it to the
+            // space-joined string here would shred space-containing class
+            // names on the next load.
+            ignore_classes: Some(match &cfg.ignore_classes_list {
+                Some(list) => StringOrList::List(list.clone()),
+                None => StringOrList::String(cfg.ignore_classes.clone()),
+            }),
             ignore_workspaces: Some(StringOrList::String(cfg.ignore_workspaces.clone())),
             num_ws: Some(cfg.num_ws),
+            ws: Some(cfg.ws),
             no_fullscreen_suppress: Some(cfg.no_fullscreen_suppress),
         },
     };

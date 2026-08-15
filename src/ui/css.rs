@@ -93,6 +93,12 @@ window {{
 /// hot-reload (`config_file::hot_reload::apply_hot_reloadable_changes`)
 /// so the rgba(...) format string lives in exactly one place.
 pub(crate) fn reload_opacity(opacity: u8) {
+    // The CLI rejects out-of-range values at parse time; the config file
+    // deserializes any u8, so clamp — loudly, matching the CLI's refusal
+    // to accept the same typo silently.
+    if opacity > OPACITY_PERCENT_MAX {
+        log::warn!("opacity {opacity} out of range 0-{OPACITY_PERCENT_MAX}; clamping");
+    }
     let alpha = f64::from(opacity.min(OPACITY_PERCENT_MAX)) / f64::from(OPACITY_PERCENT_MAX);
     let (r, g, b) = DEFAULT_BG_RGB;
     let opacity_css = format!("window {{ background-color: rgba({r}, {g}, {b}, {alpha:.2}); }}");

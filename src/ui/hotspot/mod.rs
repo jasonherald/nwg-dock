@@ -68,6 +68,7 @@ pub(crate) fn setup_autohide(
             per_monitor,
             config,
             state,
+            compositor,
             app,
         ))
     }

@@ -77,7 +77,20 @@ pub(crate) fn merge(
     if !was_set_on_cli(matches, "ignore_classes")
         && let Some(v) = file.filters.ignore_classes
     {
-        cli.ignore_classes = v.into_string(" ");
+        match v {
+            crate::config_file::schema::StringOrList::String(s) => {
+                cli.ignore_classes = s;
+                cli.ignore_classes_list = None;
+            }
+            crate::config_file::schema::StringOrList::List(list) => {
+                // Keep the real list — joining on the same separator the
+                // consumer re-splits on would shred class names that
+                // contain spaces, the exact case the array form exists
+                // for. The joined string remains as a display value.
+                cli.ignore_classes = list.join(" ");
+                cli.ignore_classes_list = Some(list);
+            }
+        }
     }
     if !was_set_on_cli(matches, "ignore_workspaces")
         && let Some(v) = file.filters.ignore_workspaces
@@ -85,6 +98,7 @@ pub(crate) fn merge(
         cli.ignore_workspaces = v.into_string(",");
     }
     overlay!(num_ws, "num_ws", file.filters.num_ws);
+    overlay!(ws, "ws", file.filters.ws);
     overlay!(
         no_fullscreen_suppress,
         "no_fullscreen_suppress",

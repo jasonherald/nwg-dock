@@ -7,15 +7,10 @@ use std::io::Write;
 use std::process::Command;
 
 fn dock_bin() -> std::path::PathBuf {
-    let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    p.push("target");
-    p.push(if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
-    });
-    p.push("nwg-dock");
-    p
+    // Cargo provides the exact path of the binary under test for
+    // integration tests — hand-building target/{debug,release} broke
+    // under CARGO_TARGET_DIR or a workspace-level target directory.
+    std::path::PathBuf::from(env!("CARGO_BIN_EXE_nwg-dock"))
 }
 
 #[test]

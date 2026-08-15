@@ -129,7 +129,7 @@ $EDITOR ~/.config/nwg-dock-hyprland/config.toml
 
 **Hot-reload:** Most fields apply immediately on save — the dock fires a desktop notification confirming the reload (or reporting a parse error). The following fields require the dock to be restarted to take effect:
 
-- `multi`, `wm`, `autohide`, `resident`, `hotspot-layer`, `layer`, `exclusive`
+- `multi`, `wm`, `autohide`, `resident`, `hotspot-layer`, `layer`, `exclusive`, `position`, `full`
 
 The dock surfaces a "change applies on next restart" notification when one of those is edited.
 

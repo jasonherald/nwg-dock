@@ -6,6 +6,7 @@ use crate::ui::constants::{SCALE_STEP_ITEMS, SCALE_THRESHOLD_ITEMS};
 use gtk4::prelude::*;
 use nwg_common::compositor::WmClient;
 use nwg_common::pinning;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -34,9 +35,22 @@ fn collect_all_items(s: &mut DockState, config: &DockConfig) -> Vec<String> {
             && !ignored_ws.iter().any(|iw| iw == ws_base)
     });
 
+    // Hide the launcher's own window by matching its class against the
+    // command's argv[0] basename — a substring test against the whole
+    // command line also hid unrelated apps whose class happened to
+    // appear anywhere in it (e.g. a window classed "auto" vs
+    // "nwg-drawer --pb-auto").
+    let launcher_bin = config
+        .launcher_cmd
+        .split_whitespace()
+        .next()
+        .and_then(|argv0| argv0.rsplit('/').next())
+        .unwrap_or("");
     let wm_map = &s.wm_class_to_desktop_id;
     for task in &s.clients {
-        if task.class.is_empty() || config.launcher_cmd.contains(&task.class) {
+        if task.class.is_empty()
+            || (!launcher_bin.is_empty() && task.class.eq_ignore_ascii_case(launcher_bin))
+        {
             continue;
         }
         // Check if this class (or its WMClass mapping) is already represented
@@ -214,6 +228,36 @@ pub(crate) fn build(
     main_box.add_controller(bg_gesture);
 
     main_box
+}
+
+/// Data indices of the pinned entries that render as `.pinned-item`
+/// widgets, in visual order.
+///
+/// SYNC: the skip conditions here MUST mirror `build_pinned_items`
+/// below — an entry skipped there but counted here (or vice versa)
+/// desynchronizes drag-reorder's visual→data index translation and a
+/// drop lands in the wrong slot. Kept adjacent so a change to one is
+/// staring at the other.
+pub(crate) fn visible_pin_indices(
+    state: &Rc<RefCell<DockState>>,
+    pinned: &[String],
+    ignored_classes: &[String],
+) -> Vec<usize> {
+    let mut already_added: Vec<&str> = Vec::new();
+    let mut visible = Vec::new();
+    for (pin_idx, pin) in pinned.iter().enumerate() {
+        if ignored_classes.contains(pin) {
+            continue;
+        }
+        let instances = state.borrow().task_instances(pin);
+        if instances.is_empty() {
+            visible.push(pin_idx);
+        } else if instances.len() == 1 || !already_added.contains(&pin.as_str()) {
+            visible.push(pin_idx);
+            already_added.push(pin.as_str());
+        }
+    }
+    visible
 }
 
 /// Adds pinned items to the dock box, with drag-source support when unlocked.

@@ -54,4 +54,5 @@
 # ignore-classes         = []
 # ignore-workspaces      = []
 # num-ws                 = 10
+# ws                     = false  # workspace switcher row between pinned and tasks
 # no-fullscreen-suppress = false
