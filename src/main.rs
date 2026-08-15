@@ -438,6 +438,10 @@ const EXIT_STARTUP_FAILURE: i32 = 1;
 /// fallback directory must be to substitute for the XDG cache dir.
 const PRIVATE_DIR_MODE: u32 = 0o700;
 
+/// Mask selecting the user/group/other permission bits of `st_mode`
+/// (excluding file-type and setuid/setgid/sticky bits).
+const PERMISSION_BITS_MASK: u32 = 0o777;
+
 /// `$XDG_RUNTIME_DIR` as a validated private-directory fallback: the
 /// value must be set, absolute, and an existing directory owned by the
 /// current user with mode 0700. Anything else returns `None` — accepting
@@ -455,7 +459,7 @@ pub(crate) fn private_runtime_dir() -> Option<PathBuf> {
     let meta = std::fs::metadata(&dir).ok()?;
     if !meta.is_dir()
         || meta.uid() != nix::unistd::geteuid().as_raw()
-        || meta.mode() & 0o777 != PRIVATE_DIR_MODE
+        || meta.mode() & PERMISSION_BITS_MASK != PRIVATE_DIR_MODE
     {
         return None;
     }

@@ -57,12 +57,32 @@ pub(crate) fn show_dock_background_menu(
     popover.popup();
 }
 
-/// Loads the lock state from cache.
+/// Loads the lock state from cache. Missing file (or no private cache
+/// dir) is the normal "never locked" case and stays silent; read
+/// failures and unrecognized contents also default to unlocked but are
+/// logged — silently discarding a persisted lock on e.g. a permission
+/// error would look like data loss to the user.
 pub(crate) fn load_lock_state() -> bool {
     let Some(path) = lock_file_path() else {
         return false; // default: unlocked
     };
-    std::fs::read_to_string(path).is_ok_and(|s| s.trim() == "true") // default: unlocked
+    match std::fs::read_to_string(&path) {
+        Ok(contents) if contents.trim() == "true" => true,
+        Ok(contents) if contents.trim() == "false" => false,
+        Ok(contents) => {
+            log::warn!(
+                "Invalid lock state {:?} in {}; defaulting to unlocked",
+                contents.trim(),
+                path.display()
+            );
+            false
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => {
+            log::warn!("Failed to read lock state from {}: {e}", path.display());
+            false
+        }
+    }
 }
 
 fn save_lock_state(locked: bool) {
