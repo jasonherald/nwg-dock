@@ -214,8 +214,15 @@ Hyprland 0.55+ Lua configurations don't read `autostart.conf`. On Omarchy
 o.launch_on_start([[nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c "nwg-drawer --opacity 88 --pb-auto"]])
 ```
 
-(On plain Lua setups without Omarchy's helpers, register the command on
-the start hook: `hl.on("hyprland.start", function() hl.exec_cmd([[nwg-dock …]]) end)`.)
+On plain Lua setups without Omarchy's helpers, register the command on the
+start hook instead. This goes in a Lua file loaded by
+`~/.config/hypr/hyprland.lua` (directly, or via a `require(...)` from it):
+
+```lua
+hl.on("hyprland.start", function()
+  hl.exec_cmd([[nwg-dock -d -i 48 --mb 10 --hide-timeout 400 --opacity 75 --launch-animation -c "nwg-drawer --pb-auto"]])
+end)
+```
 
 **Migrating to Omarchy 4.0:** the Quattro migration generates the new
 `.lua` config files but does **not** carry custom `exec-once` lines
