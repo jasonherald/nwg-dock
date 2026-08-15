@@ -208,9 +208,13 @@ fn create_hotspot_window(ctx: &HotspotContext, dock: &MonitorDock) -> gtk4::Appl
             return;
         }
         let delay_ms = cfg.hotspot_delay.max(0) as u64;
+        // Disarm the hide timer as soon as the cursor engages the
+        // hotspot — with hotspot_delay > hide_timeout, a stale
+        // `left_at` from the preceding leave could hide a visible dock
+        // mid-dwell and have the delayed show flash it back.
+        *left_at_enter.borrow_mut() = None;
         if delay_ms == 0 {
             show_on_monitor_only_by_name(&docks_enter, &name_enter);
-            *left_at_enter.borrow_mut() = None;
             return;
         }
         if let Some(old) = pending_enter.borrow_mut().take() {

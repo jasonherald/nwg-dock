@@ -59,19 +59,29 @@ pub(crate) fn show_dock_background_menu(
 
 /// Loads the lock state from cache.
 pub(crate) fn load_lock_state() -> bool {
-    let path = lock_file_path();
+    let Some(path) = lock_file_path() else {
+        return false; // default: unlocked
+    };
     std::fs::read_to_string(path).is_ok_and(|s| s.trim() == "true") // default: unlocked
 }
 
 fn save_lock_state(locked: bool) {
-    let path = lock_file_path();
+    let Some(path) = lock_file_path() else {
+        log::warn!("No private cache directory; lock state not persisted");
+        return;
+    };
     if let Err(e) = std::fs::write(&path, if locked { "true" } else { "false" }) {
         log::warn!("Failed to save lock state: {e}");
     }
 }
 
-fn lock_file_path() -> std::path::PathBuf {
+/// Cache path for the lock file, or `None` when no private directory is
+/// available. Never falls back to /tmp — a predictable name in a
+/// world-writable directory lets a pre-planted symlink redirect our
+/// read/write to attacker-chosen paths (same hardening as the pin file
+/// in main.rs).
+fn lock_file_path() -> Option<std::path::PathBuf> {
     nwg_common::config::paths::cache_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-        .join(LOCK_FILE)
+        .or_else(|| std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from))
+        .map(|d| d.join(LOCK_FILE))
 }

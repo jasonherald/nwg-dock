@@ -129,13 +129,23 @@ fn main() {
         }
     }
 
-    // Log-and-fallback like the data-home path above — a missing
-    // $HOME/$XDG_CACHE_HOME (misconfigured service unit) shouldn't be a
-    // raw panic.
-    let cache_dir = paths::cache_dir().unwrap_or_else(|| {
-        log::error!("Couldn't determine cache directory; falling back to /tmp");
-        PathBuf::from("/tmp")
-    });
+    // A missing $HOME/$XDG_CACHE_HOME (misconfigured service unit)
+    // shouldn't be a raw panic — but the fallback must never be /tmp:
+    // the pin file and its rename-temp sibling would sit at predictable
+    // names in a world-writable directory, where a pre-planted symlink
+    // turns our reads and writes into reads/writes of attacker-chosen
+    // paths. $XDG_RUNTIME_DIR is per-user and mode 0700; if that's
+    // unset too, the environment is too broken to run safely.
+    let cache_dir = paths::cache_dir()
+        .or_else(|| std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from))
+        .unwrap_or_else(|| {
+            log::error!(
+                "No usable private cache directory (XDG_CACHE_HOME, HOME, \
+                 XDG_RUNTIME_DIR all unusable); refusing a world-writable \
+                 /tmp fallback for the pin file"
+            );
+            std::process::exit(1);
+        });
     let pinned_file = cache_dir.join("mac-dock-pinned");
     let app_dirs = get_app_dirs();
     let sig_rx = Rc::new(signals::setup_signal_handlers(config.is_resident_mode()));
