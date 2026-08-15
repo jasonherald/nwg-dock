@@ -78,10 +78,10 @@ fn save_lock_state(locked: bool) {
 /// Cache path for the lock file, or `None` when no private directory is
 /// available. Never falls back to /tmp — a predictable name in a
 /// world-writable directory lets a pre-planted symlink redirect our
-/// read/write to attacker-chosen paths (same hardening as the pin file
-/// in main.rs).
+/// read/write to attacker-chosen paths. Shares the validated
+/// `private_runtime_dir` fallback with the pin file in main.rs.
 fn lock_file_path() -> Option<std::path::PathBuf> {
     nwg_common::config::paths::cache_dir()
-        .or_else(|| std::env::var_os("XDG_RUNTIME_DIR").map(std::path::PathBuf::from))
+        .or_else(crate::private_runtime_dir)
         .map(|d| d.join(LOCK_FILE))
 }

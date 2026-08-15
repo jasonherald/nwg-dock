@@ -137,14 +137,14 @@ fn main() {
     // paths. $XDG_RUNTIME_DIR is per-user and mode 0700; if that's
     // unset too, the environment is too broken to run safely.
     let cache_dir = paths::cache_dir()
-        .or_else(|| std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from))
+        .or_else(private_runtime_dir)
         .unwrap_or_else(|| {
             log::error!(
                 "No usable private cache directory (XDG_CACHE_HOME, HOME, \
                  XDG_RUNTIME_DIR all unusable); refusing a world-writable \
                  /tmp fallback for the pin file"
             );
-            std::process::exit(1);
+            std::process::exit(EXIT_STARTUP_FAILURE);
         });
     let pinned_file = cache_dir.join("mac-dock-pinned");
     let app_dirs = get_app_dirs();
@@ -429,6 +429,38 @@ fn acquire_singleton_lock(
 /// Unix permission mask for "executable by anyone" (owner, group, or
 /// other execute bit).
 const EXEC_PERMISSION_MASK: u32 = 0o111;
+
+/// Process exit status for unrecoverable startup errors (conventional
+/// generic-failure code).
+const EXIT_STARTUP_FAILURE: i32 = 1;
+
+/// Owner-only directory permissions (`drwx------`) — what a private
+/// fallback directory must be to substitute for the XDG cache dir.
+const PRIVATE_DIR_MODE: u32 = 0o700;
+
+/// `$XDG_RUNTIME_DIR` as a validated private-directory fallback: the
+/// value must be set, absolute, and an existing directory owned by the
+/// current user with mode 0700. Anything else returns `None` — accepting
+/// an empty/relative/shared directory here would defeat the point of
+/// refusing the /tmp fallback (see the pin-file call site). Shared by
+/// the pin-file path below and the arrangement lock file in
+/// `ui::dock_menu`.
+pub(crate) fn private_runtime_dir() -> Option<PathBuf> {
+    use std::os::unix::fs::MetadataExt;
+
+    let dir = PathBuf::from(std::env::var_os("XDG_RUNTIME_DIR")?);
+    if !dir.is_absolute() {
+        return None;
+    }
+    let meta = std::fs::metadata(&dir).ok()?;
+    if !meta.is_dir()
+        || meta.uid() != nix::unistd::geteuid().as_raw()
+        || meta.mode() & 0o777 != PRIVATE_DIR_MODE
+    {
+        return None;
+    }
+    Some(dir)
+}
 
 /// Checks if a command exists on PATH — file AND executable bit, matching
 /// real shell lookup (a plain `is_file` check kept the launcher visible

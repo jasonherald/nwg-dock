@@ -29,22 +29,39 @@ pub(crate) struct HotspotContext {
     state: Rc<RefCell<DockState>>,
     compositor: Rc<dyn Compositor>,
     /// Tracks hotspot windows by output name so they can be torn down on unplug.
-    hotspots: RefCell<std::collections::HashMap<String, gtk4::ApplicationWindow>>,
+    hotspots: RefCell<std::collections::HashMap<String, TrackedHotspot>>,
+}
+
+/// One tracked hotspot: the strip window plus its pending delayed-show
+/// timer. The timer must be cancelled at teardown — a scheduled show
+/// surviving `remove_hotspot_for_output` could fire against a
+/// re-created dock on the same output name without a fresh dwell.
+struct TrackedHotspot {
+    win: gtk4::ApplicationWindow,
+    pending_show: Rc<RefCell<Option<glib::SourceId>>>,
 }
 
 impl HotspotContext {
-    /// Creates a hotspot window for a newly added dock (called during reconciliation).
+    /// Creates a hotspot window for a newly added dock (called during
+    /// reconciliation). Replacing an existing entry for the same output
+    /// goes through `remove_hotspot_for_output` first so its pending
+    /// show timer is cancelled, not leaked.
     pub(crate) fn add_hotspot_for_dock(&self, dock: &MonitorDock) {
+        self.remove_hotspot_for_output(&dock.output_name);
         let hotspot = create_hotspot_window(self, dock);
         self.hotspots
             .borrow_mut()
             .insert(dock.output_name.clone(), hotspot);
     }
 
-    /// Destroys the hotspot window for a removed monitor.
+    /// Destroys the hotspot window for a removed monitor, cancelling any
+    /// pending delayed-show timer first.
     pub(crate) fn remove_hotspot_for_output(&self, output_name: &str) {
         if let Some(hotspot) = self.hotspots.borrow_mut().remove(output_name) {
-            hotspot.close();
+            if let Some(pending) = hotspot.pending_show.borrow_mut().take() {
+                pending.remove();
+            }
+            hotspot.win.close();
         }
     }
 
@@ -55,7 +72,7 @@ impl HotspotContext {
     ) {
         for (name, hotspot) in self.hotspots.borrow().iter() {
             if let Some(mon) = monitor_map.get(name) {
-                hotspot.set_monitor(Some(mon));
+                hotspot.win.set_monitor(Some(mon));
             }
         }
     }
@@ -140,7 +157,7 @@ pub(super) fn start_hotspot_windows(
 
 /// Creates a single hotspot trigger window for one monitor and attaches enter/leave handlers.
 /// Returns the hotspot window so the caller can track and destroy it on unplug.
-fn create_hotspot_window(ctx: &HotspotContext, dock: &MonitorDock) -> gtk4::ApplicationWindow {
+fn create_hotspot_window(ctx: &HotspotContext, dock: &MonitorDock) -> TrackedHotspot {
     let output_name = dock.output_name.clone();
     let docks = Rc::clone(&ctx.per_monitor);
     let left_at = &ctx.left_at;
@@ -270,7 +287,10 @@ fn create_hotspot_window(ctx: &HotspotContext, dock: &MonitorDock) -> gtk4::Appl
     });
     dock.win.add_controller(leave_motion);
 
-    hotspot
+    TrackedHotspot {
+        win: hotspot,
+        pending_show,
+    }
 }
 
 /// Configures a hotspot window as a thin strip at the dock edge on the
